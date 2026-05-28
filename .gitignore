@@ -25,3 +25,5 @@ frontend/src-tauri/target/
 backend/.venv/
 dist/
 build/
+frontend/.next-dev.log
+frontend/src-tauri/gen/
