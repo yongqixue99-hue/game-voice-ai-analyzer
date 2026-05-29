@@ -22,6 +22,7 @@ frontend/node_modules/
 frontend/.next/
 frontend/out/
 frontend/src-tauri/target/
+frontend/src-tauri/binaries/
 backend/.venv/
 dist/
 build/

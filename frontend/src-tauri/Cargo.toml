@@ -10,4 +10,9 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+# `test` feature only for the mock-runtime sidecar verification; not in release builds.
+tauri = { version = "2", features = ["test"] }
