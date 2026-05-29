@@ -218,7 +218,9 @@ declare global {
     __LUNARIS_CONFIG__?: {
       apiBaseUrl?: string;
     };
-    __TAURI_INTERNALS__?: unknown;
+    __TAURI_INTERNALS__?: {
+      invoke?: <T = unknown>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+    };
   }
 }
 
@@ -334,6 +336,42 @@ function detectRuntimeEnvironment(): RuntimeEnvironment {
     return "Tauri";
   }
   return "Browser";
+}
+
+type TauriApiBaseUrlInfo = {
+  url: string;
+  source: "default" | "env:LUNARIS_API_BASE_URL" | "env:LUNARIS_PORT";
+};
+
+type TauriRuntimeInfo = {
+  runtime: string;
+  tauri_version: string;
+  app_version: string;
+  backend_management_mode: string;
+  data_dir_override: string | null;
+};
+
+type TauriBackendStatus = {
+  mode: string;
+  note: string;
+  api_base_url: string;
+};
+
+const apiBaseUrlSourceLabel: Record<TauriApiBaseUrlInfo["source"], string> = {
+  default: "默认值",
+  "env:LUNARIS_API_BASE_URL": "环境变量 LUNARIS_API_BASE_URL",
+  "env:LUNARIS_PORT": "环境变量 LUNARIS_PORT",
+};
+
+async function invokeTauri<T>(cmd: string): Promise<T | null> {
+  if (typeof window === "undefined") return null;
+  const invoke = window.__TAURI_INTERNALS__?.invoke;
+  if (typeof invoke !== "function") return null;
+  try {
+    return await invoke<T>(cmd);
+  } catch {
+    return null;
+  }
 }
 
 function audioUrl(recordingId: string) {
@@ -1427,6 +1465,12 @@ export default function Home() {
     useState<Record<string, string>>({});
   const [runtimeEnvironment, setRuntimeEnvironment] =
     useState<RuntimeEnvironment>("Browser");
+  const [tauriApiBaseUrlInfo, setTauriApiBaseUrlInfo] =
+    useState<TauriApiBaseUrlInfo | null>(null);
+  const [tauriRuntimeInfo, setTauriRuntimeInfo] =
+    useState<TauriRuntimeInfo | null>(null);
+  const [tauriBackendStatus, setTauriBackendStatus] =
+    useState<TauriBackendStatus | null>(null);
   const [backendHealthStatus, setBackendHealthStatus] =
     useState<BackendHealthStatus>("checking");
   const [backendHealth, setBackendHealth] = useState<BackendHealth | null>(null);
@@ -1544,8 +1588,20 @@ export default function Home() {
   }, [loadRecordingSessions]);
 
   useEffect(() => {
-    setRuntimeEnvironment(detectRuntimeEnvironment());
+    const env = detectRuntimeEnvironment();
+    setRuntimeEnvironment(env);
     void checkBackendHealth();
+    if (env === "Tauri") {
+      void invokeTauri<TauriApiBaseUrlInfo>("get_api_base_url").then((v) => {
+        if (v) setTauriApiBaseUrlInfo(v);
+      });
+      void invokeTauri<TauriRuntimeInfo>("get_runtime_info").then((v) => {
+        if (v) setTauriRuntimeInfo(v);
+      });
+      void invokeTauri<TauriBackendStatus>("get_backend_status").then((v) => {
+        if (v) setTauriBackendStatus(v);
+      });
+    }
   }, [checkBackendHealth]);
 
   const clearBrowserRecordingTimer = useCallback(() => {
@@ -4967,6 +5023,57 @@ export default function Home() {
                   {runtimeEnvironment}
                 </StatusPill>
               </SettingRow>
+
+              <SettingRow
+                description={
+                  runtimeEnvironment === "Tauri"
+                    ? tauriApiBaseUrlInfo
+                      ? `Tauri 控制面解析：${apiBaseUrlSourceLabel[tauriApiBaseUrlInfo.source]}`
+                      : "正在向 Tauri 控制面查询…"
+                    : "Browser 模式下使用前端默认 API Base URL，未通过 Tauri 控制面解析。"
+                }
+                title="API Base URL 来源"
+              >
+                <StatusPill tone={runtimeEnvironment === "Tauri" ? "info" : "neutral"}>
+                  {runtimeEnvironment === "Tauri"
+                    ? tauriApiBaseUrlInfo
+                      ? apiBaseUrlSourceLabel[tauriApiBaseUrlInfo.source]
+                      : "查询中"
+                    : "Browser 默认"}
+                </StatusPill>
+              </SettingRow>
+
+              <SettingRow
+                description={
+                  runtimeEnvironment === "Tauri"
+                    ? tauriBackendStatus
+                      ? tauriBackendStatus.note
+                      : "正在向 Tauri 控制面查询后端管理模式…"
+                    : "Browser 模式下不通过 Tauri 控制面管理后端。"
+                }
+                title="后端管理模式"
+              >
+                <StatusPill tone="neutral">
+                  {runtimeEnvironment === "Tauri"
+                    ? tauriBackendStatus?.mode ?? "查询中"
+                    : "manual-dev"}
+                </StatusPill>
+                <StatusPill tone="neutral">占位，生产版待实现</StatusPill>
+              </SettingRow>
+
+              {runtimeEnvironment === "Tauri" && tauriRuntimeInfo ? (
+                <SettingRow
+                  description={`runtime=${tauriRuntimeInfo.runtime} · app=${tauriRuntimeInfo.app_version} · tauri=${tauriRuntimeInfo.tauri_version}${
+                    tauriRuntimeInfo.data_dir_override
+                      ? ` · LUNARIS_DATA_DIR=${tauriRuntimeInfo.data_dir_override}`
+                      : ""
+                  }`}
+                  title="Tauri Runtime 信息"
+                >
+                  <StatusPill tone="info">{tauriRuntimeInfo.runtime}</StatusPill>
+                  <StatusPill tone="neutral">v{tauriRuntimeInfo.app_version}</StatusPill>
+                </SettingRow>
+              ) : null}
 
               <SettingRow
                 description={

@@ -7,7 +7,7 @@
 
 - 项目名称：LUNARIS（游戏语音录音 / 转写 / AI 总结桌面应用）
 - 项目路径：`/Users/xueyongqi/project/project-2`
-- 当前阶段：P1「Tauri 生产后端控制面骨架」已落地（仅 Rust 侧 IPC 形状，前端未接线）；进入「P1.5 前端接线 → P2 PyInstaller 最小样例」阶段
+- 当前阶段：P1.5「前端最小接线 Tauri 控制面」已落地；进入「P2 PyInstaller + Tauri sidecar hello-world 验证」阶段
 - 当前主要目标：在不动业务逻辑的前提下，优化开发期一键启动体验，并规划生产打包方案
 - 当前推荐开发方式：Claude Code 命令行（真实终端），不要在 Claude 桌面端沙箱里跑 dev server
 
@@ -94,6 +94,9 @@ LUNARIS 旨在成为一个面向游戏 / 多人语音场景的桌面级语音分
   - `openspec/changes/tauri-prod-backend-control-plane/`（P1 控制面骨架：Rust 侧 IPC）
     - `proposal.md` / `design.md` / `spec.md` / `tasks.md`
     - `specs/tauri-prod-backend-control-plane/spec.md`
+  - `openspec/changes/tauri-prod-backend-control-plane-frontend-wire/`（P1.5 前端接线，最小增量）
+    - `proposal.md` / `design.md` / `spec.md` / `tasks.md`
+    - `specs/tauri-prod-backend-control-plane-frontend-wire/spec.md`
 - 设计稿：`design/LUNARIS-desktop-ui-handoff.md`
 - 代码内说明：`frontend/README.md`、`frontend/AGENTS.md`、`frontend/CLAUDE.md`、`backend/README.md`
 
@@ -106,7 +109,8 @@ LUNARIS 旨在成为一个面向游戏 / 多人语音场景的桌面级语音分
   - `143dab5` 新增项目交接文档
   - `09dc401` 新增开发环境一键启动脚本
   - `673dc3c` 新增 Tauri 生产后端启动方案设计
-  - 本次提交：新增 Tauri 后端控制面骨架（hash 提交后补充）
+  - `5d8e023` 新增 Tauri 后端控制面骨架
+  - 本次提交：接入 Tauri 后端控制面到设置页（hash 提交后补充）
 
 ## 7. 当前验证结果
 
@@ -213,31 +217,23 @@ git log --oneline -5
 
 当前需要同时开三个终端（uvicorn / Next dev / Tauri dev）。下一步**先不要做复杂打包**，也不要急着把 Python 后端塞进 Tauri。先做低风险的开发体验优化。
 
-### 下一阶段目标：P1.5 前端接线 → P2 PyInstaller 最小样例
+### 下一阶段目标：P2 PyInstaller + Tauri sidecar hello-world 验证
 
-P1 控制面骨架已落地：Rust 侧 5 个 Tauri commands（`get_api_base_url` / `get_runtime_info` / `get_backend_status` / `start_backend` / `stop_backend`），其中启停为占位实现，明确不会触碰用户已有的 uvicorn 进程。前端**暂未接线**，设置页 UI 与之前一致。
+P1.5 已落地：设置页在 Tauri 模式下消费 3 个只读 IPC（`get_api_base_url` / `get_runtime_info` / `get_backend_status`），新增 3 行展示「API Base URL 来源」「后端管理模式」「Tauri Runtime 信息」；不引入 `@tauri-apps/api` 依赖，不动业务逻辑；Browser 模式走 fallback 文案。`start_backend` / `stop_backend` 仍为占位，UI 未暴露按钮。
 
-启动方式仍是 `./scripts/dev-all.sh`（首选）或手动三终端，未变。
+启动方式仍是 `./scripts/dev-all.sh`，未变。
 
-#### P1.5（建议下一步先做，最小增量）：前端接线新 IPC
-
-- 仅在 `runtimeEnvironment === "Tauri"` 时调用 `invoke("get_api_base_url")` / `invoke("get_runtime_info")`。
-- 设置页新增 2 个只读行：「API Base URL 来源」「后端管理模式」。
-- 不重构页面、不动现有状态机、Browser 模式继续走 fallback。
-- 单独新建 change：`tauri-prod-backend-control-plane-frontend-wire`。
-
-#### P2：PyInstaller 最小样例
+#### P2（建议下一步）：PyInstaller + sidecar hello-world
 
 - 单独 change：`tauri-prod-backend-pyinstaller`。
-- 用最小的 hello-world FastAPI app 先验证 PyInstaller 能产出可签名的二进制；再扩展到真实 backend。
-- 替换 `start_backend` / `stop_backend` 占位实现为 sidecar spawn / kill。
-- 真正动 `bundle.active` 与签名是 P3 的事。
+- 用一个 hello-world FastAPI（仅暴露 `/api/health`）验证 PyInstaller 单文件/单目录可执行 + Tauri externalBin sidecar + Rust 侧真实 spawn / kill。
+- 仍**不**触碰真实 backend、**不**做签名公证、**不**改 `bundle.active`（手动测试用 `tauri build --no-bundle` 或 ad-hoc 跑生成的 binary）。
+- 完成后 `start_backend` / `stop_backend` 才会从占位换成真实实现。
 
-#### 优先级 A：~~开发期一键启动脚本~~ ✅ 已完成（`scripts/dev-all.sh`）
-
+#### 优先级 A：~~开发期一键启动脚本~~ ✅ 已完成
 #### 优先级 B：~~Tauri 生产版后端启动方案（仅设计）~~ ✅ 已完成
-
-#### 优先级 C：~~P1 控制面骨架~~ ✅ 已完成（本次）
+#### 优先级 C：~~P1 控制面骨架~~ ✅ 已完成
+#### 优先级 D：~~P1.5 前端接线~~ ✅ 已完成（本次）
 
 - 写设计文档说明：
   - 如何让 Tauri 自动拉起 FastAPI
