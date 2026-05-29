@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from .paths import resolve_data_paths
+
 
 def load_env_file(env_path: Path) -> None:
     if not env_path.exists():
@@ -24,8 +26,12 @@ def load_env_file(env_path: Path) -> None:
 @dataclass(frozen=True)
 class Settings:
     project_root: Path
+    data_dir: Path | None
     database_url: str
     audio_storage_dir: Path
+    exports_dir: Path
+    logs_dir: Path
+    config_dir: Path
     max_upload_bytes: int
     allowed_extensions: frozenset[str]
     allowed_mime_types: frozenset[str]
@@ -51,19 +57,17 @@ def get_settings() -> Settings:
     load_env_file(project_root / ".env")
     load_env_file(project_root / "backend" / ".env")
 
-    audio_storage_dir = Path(
-        os.getenv("AUDIO_STORAGE_DIR", str(project_root / "storage" / "audio"))
-    )
-    database_url = os.getenv(
-        "DATABASE_URL",
-        f"sqlite:///{project_root / 'backend' / 'recordings.sqlite3'}",
-    )
+    data_paths = resolve_data_paths(project_root)
     max_upload_bytes = int(os.getenv("MAX_UPLOAD_BYTES", str(100 * 1024 * 1024)))
 
     return Settings(
         project_root=project_root,
-        database_url=database_url,
-        audio_storage_dir=audio_storage_dir,
+        data_dir=data_paths.data_dir,
+        database_url=data_paths.database_url,
+        audio_storage_dir=data_paths.audio_storage_dir,
+        exports_dir=data_paths.exports_dir,
+        logs_dir=data_paths.logs_dir,
+        config_dir=data_paths.config_dir,
         max_upload_bytes=max_upload_bytes,
         allowed_extensions=frozenset({".mp3", ".wav", ".m4a", ".webm"}),
         allowed_mime_types=frozenset(

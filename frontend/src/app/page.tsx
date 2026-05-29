@@ -1482,6 +1482,12 @@ export default function Home() {
   const [tauriBackendActionPending, setTauriBackendActionPending] =
     useState(false);
   const [tauriBackendActionError, setTauriBackendActionError] = useState("");
+  const [tauriRealBackendStatus, setTauriRealBackendStatus] =
+    useState<TauriBackendStatus | null>(null);
+  const [tauriRealBackendActionPending, setTauriRealBackendActionPending] =
+    useState(false);
+  const [tauriRealBackendActionError, setTauriRealBackendActionError] =
+    useState("");
   const [backendHealthStatus, setBackendHealthStatus] =
     useState<BackendHealthStatus>("checking");
   const [backendHealth, setBackendHealth] = useState<BackendHealth | null>(null);
@@ -1595,6 +1601,13 @@ export default function Home() {
     if (status) setTauriBackendStatus(status);
   }, []);
 
+  const refreshRealBackendStatus = useCallback(async () => {
+    const status = await invokeTauri<TauriBackendStatus>(
+      "get_real_backend_status",
+    );
+    if (status) setTauriRealBackendStatus(status);
+  }, []);
+
   const runBackendAction = useCallback(
     async (cmd: "start_backend" | "stop_backend") => {
       setTauriBackendActionPending(true);
@@ -1609,6 +1622,22 @@ export default function Home() {
       setTauriBackendActionPending(false);
     },
     [refreshBackendStatus],
+  );
+
+  const runRealBackendAction = useCallback(
+    async (cmd: "start_real_backend" | "stop_real_backend") => {
+      setTauriRealBackendActionPending(true);
+      setTauriRealBackendActionError("");
+      const result = await invokeTauri<TauriBackendActionResult>(cmd);
+      if (!result) {
+        setTauriRealBackendActionError("无法调用 Tauri 控制面命令。");
+      } else if (!result.ok) {
+        setTauriRealBackendActionError(result.message);
+      }
+      await refreshRealBackendStatus();
+      setTauriRealBackendActionPending(false);
+    },
+    [refreshRealBackendStatus],
   );
 
   useEffect(() => {
@@ -1633,6 +1662,11 @@ export default function Home() {
       void invokeTauri<TauriBackendStatus>("get_backend_status").then((v) => {
         if (v) setTauriBackendStatus(v);
       });
+      void invokeTauri<TauriBackendStatus>("get_real_backend_status").then(
+        (v) => {
+          if (v) setTauriRealBackendStatus(v);
+        },
+      );
     }
   }, [checkBackendHealth]);
 
@@ -5106,7 +5140,7 @@ export default function Home() {
                         : "正在查询后端进程状态…"
                     : "Browser 模式下无法由 Tauri 启停后端。"
                 }
-                title="后端进程控制"
+                title="后端进程控制（hello-backend / fallback）"
               >
                 <StatusPill
                   tone={tauriBackendStatus?.running ? "success" : "neutral"}
@@ -5140,6 +5174,57 @@ export default function Home() {
                   }}
                 >
                   停止后端
+                </button>
+              </SettingRow>
+
+              <SettingRow
+                description={
+                  runtimeEnvironment === "Tauri"
+                    ? tauriRealBackendActionError
+                      ? tauriRealBackendActionError
+                      : tauriRealBackendStatus
+                        ? `${tauriRealBackendStatus.running ? "running" : "stopped"}${
+                            tauriRealBackendStatus.pid != null
+                              ? ` · pid ${tauriRealBackendStatus.pid}`
+                              : ""
+                          } · ${tauriRealBackendStatus.api_base_url}`
+                        : "正在查询真实后端进程状态…"
+                    : "Browser 模式下无法由 Tauri 启停真实后端。"
+                }
+                title="真实后端进程控制（FastAPI sidecar）"
+              >
+                <StatusPill
+                  tone={tauriRealBackendStatus?.running ? "success" : "neutral"}
+                >
+                  {tauriRealBackendStatus?.running ? "running" : "stopped"}
+                </StatusPill>
+                <button
+                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:opacity-50"
+                  type="button"
+                  disabled={
+                    runtimeEnvironment !== "Tauri" ||
+                    tauriRealBackendActionPending ||
+                    (tauriRealBackendStatus?.running ?? false)
+                  }
+                  onClick={() => {
+                    void runRealBackendAction("start_real_backend");
+                  }}
+                >
+                  启动真实后端
+                </button>
+                <button
+                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:opacity-50"
+                  type="button"
+                  disabled={
+                    runtimeEnvironment !== "Tauri" ||
+                    tauriRealBackendActionPending ||
+                    !(tauriRealBackendStatus?.running ?? false)
+                  }
+                  onClick={() => {
+                    void runRealBackendAction("stop_real_backend");
+                  }}
+                >
+                  停止真实后端
                 </button>
               </SettingRow>
 

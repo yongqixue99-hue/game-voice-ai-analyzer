@@ -1,16 +1,23 @@
 use serde::Serialize;
 use std::env;
 use std::sync::Mutex;
+use tauri::Manager;
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
 
 const DEFAULT_BACKEND_PORT: u16 = 8000;
 const SIDECAR_NAME: &str = "lunaris-hello-backend";
 const DEFAULT_SIDECAR_PORT: u16 = 8765;
+const REAL_SIDECAR_NAME: &str = "lunaris-real-backend";
+const DEFAULT_REAL_BACKEND_PORT: u16 = 18080;
 
-/// Holds the handle to the sidecar backend process, if Tauri started one.
+/// Handle to the hello-backend sidecar process (fallback / experiment link).
 #[derive(Default)]
 struct BackendProcess(Mutex<Option<CommandChild>>);
+
+/// Handle to the real FastAPI backend sidecar process.
+#[derive(Default)]
+struct RealBackendProcess(Mutex<Option<CommandChild>>);
 
 #[derive(Serialize)]
 struct ApiBaseUrl {
@@ -43,12 +50,34 @@ struct BackendActionResult {
     message: String,
 }
 
-/// Port the sidecar binds to. Honors LUNARIS_PORT, else falls back to 8765.
+/// Port the hello sidecar binds to. Honors LUNARIS_PORT, else falls back to 8765.
 fn sidecar_port() -> u16 {
     env::var("LUNARIS_PORT")
         .ok()
         .and_then(|p| p.trim().parse::<u16>().ok())
         .unwrap_or(DEFAULT_SIDECAR_PORT)
+}
+
+/// Port the real backend sidecar binds to. Honors LUNARIS_REAL_PORT, else 18080.
+fn real_backend_port() -> u16 {
+    env::var("LUNARIS_REAL_PORT")
+        .ok()
+        .and_then(|p| p.trim().parse::<u16>().ok())
+        .unwrap_or(DEFAULT_REAL_BACKEND_PORT)
+}
+
+/// Data dir handed to the real backend. Uses LUNARIS_DATA_DIR when set, else the
+/// OS app-data dir — frozen backends must not write to the temp extraction dir.
+fn resolve_real_data_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<String> {
+    if let Ok(dir) = env::var("LUNARIS_DATA_DIR") {
+        if !dir.trim().is_empty() {
+            return Some(dir);
+        }
+    }
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|p| p.join("data").to_string_lossy().into_owned())
 }
 
 fn resolve_api_base_url() -> ApiBaseUrl {
@@ -69,6 +98,29 @@ fn resolve_api_base_url() -> ApiBaseUrl {
         url: format!("http://127.0.0.1:{DEFAULT_BACKEND_PORT}"),
         source: "default",
     }
+}
+
+/// Spawn a sidecar by name, draining its event channel so it never blocks on IO.
+fn spawn_sidecar<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    sidecar_name: &str,
+    port: u16,
+    data_dir: Option<String>,
+) -> Result<CommandChild, String> {
+    let mut command = app
+        .shell()
+        .sidecar(sidecar_name)
+        .map_err(|e| format!("无法定位 sidecar：{e}"))?
+        .env("LUNARIS_PORT", port.to_string())
+        .env("LUNARIS_HOST", "127.0.0.1");
+    if let Some(dir) = data_dir {
+        if !dir.trim().is_empty() {
+            command = command.env("LUNARIS_DATA_DIR", dir);
+        }
+    }
+    let (mut rx, child) = command.spawn().map_err(|e| format!("启动失败：{e}"))?;
+    tauri::async_runtime::spawn(async move { while rx.recv().await.is_some() {} });
+    Ok(child)
 }
 
 #[tauri::command]
@@ -115,31 +167,11 @@ fn start_backend<R: tauri::Runtime>(
 ) -> BackendActionResult {
     let mut guard = state.0.lock().unwrap();
     if guard.is_some() {
-        return BackendActionResult {
-            ok: true,
-            mode: "sidecar",
-            message: "后端已在运行。".into(),
-        };
+        return BackendActionResult { ok: true, mode: "sidecar", message: "后端已在运行。".into() };
     }
-
     let port = sidecar_port();
-    let command = match app.shell().sidecar(SIDECAR_NAME) {
-        Ok(cmd) => cmd
-            .env("LUNARIS_PORT", port.to_string())
-            .env("LUNARIS_HOST", "127.0.0.1"),
-        Err(e) => {
-            return BackendActionResult {
-                ok: false,
-                mode: "sidecar",
-                message: format!("无法定位 sidecar：{e}"),
-            }
-        }
-    };
-
-    match command.spawn() {
-        Ok((mut rx, child)) => {
-            // Drain the event channel so the child never blocks on stdout/stderr.
-            tauri::async_runtime::spawn(async move { while rx.recv().await.is_some() {} });
+    match spawn_sidecar(&app, SIDECAR_NAME, port, None) {
+        Ok(child) => {
             *guard = Some(child);
             BackendActionResult {
                 ok: true,
@@ -147,35 +179,82 @@ fn start_backend<R: tauri::Runtime>(
                 message: format!("已启动 hello-backend，端口 {port}。"),
             }
         }
-        Err(e) => BackendActionResult {
-            ok: false,
-            mode: "sidecar",
-            message: format!("启动失败：{e}"),
-        },
+        Err(message) => BackendActionResult { ok: false, mode: "sidecar", message },
     }
 }
 
 #[tauri::command]
 fn stop_backend(state: tauri::State<BackendProcess>) -> BackendActionResult {
-    let mut guard = state.0.lock().unwrap();
-    let Some(child) = guard.take() else {
-        return BackendActionResult {
-            ok: true,
+    stop_slot(&state.0)
+}
+
+#[tauri::command]
+fn get_real_backend_status(state: tauri::State<RealBackendProcess>) -> BackendStatus {
+    let guard = state.0.lock().unwrap();
+    let port = real_backend_port();
+    match guard.as_ref() {
+        Some(child) => BackendStatus {
+            mode: "sidecar",
+            running: true,
+            pid: Some(child.pid()),
+            api_base_url: format!("http://127.0.0.1:{port}"),
+            note: "Tauri 通过 sidecar 管理真实 FastAPI 后端。",
+        },
+        None => BackendStatus {
             mode: "stopped",
-            message: "后端未在运行。".into(),
-        };
+            running: false,
+            pid: None,
+            api_base_url: format!("http://127.0.0.1:{port}"),
+            note: "真实后端未由 Tauri 启动。",
+        },
+    }
+}
+
+#[tauri::command]
+fn start_real_backend<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: tauri::State<RealBackendProcess>,
+) -> BackendActionResult {
+    let mut guard = state.0.lock().unwrap();
+    if guard.is_some() {
+        return BackendActionResult { ok: true, mode: "sidecar", message: "真实后端已在运行。".into() };
+    }
+    let port = real_backend_port();
+    let data_dir = resolve_real_data_dir(&app);
+    match spawn_sidecar(&app, REAL_SIDECAR_NAME, port, data_dir) {
+        Ok(child) => {
+            *guard = Some(child);
+            BackendActionResult {
+                ok: true,
+                mode: "sidecar",
+                message: format!("已启动真实后端，端口 {port}。"),
+            }
+        }
+        Err(message) => BackendActionResult { ok: false, mode: "sidecar", message },
+    }
+}
+
+#[tauri::command]
+fn stop_real_backend(state: tauri::State<RealBackendProcess>) -> BackendActionResult {
+    stop_slot(&state.0)
+}
+
+/// Take and terminate whatever child is held in a process slot.
+fn stop_slot(slot: &Mutex<Option<CommandChild>>) -> BackendActionResult {
+    let mut guard = slot.lock().unwrap();
+    let Some(child) = guard.take() else {
+        return BackendActionResult { ok: true, mode: "stopped", message: "后端未在运行。".into() };
     };
     match terminate_backend(child.pid(), child) {
-        Ok(()) => BackendActionResult {
-            ok: true,
-            mode: "stopped",
-            message: "已停止后端。".into(),
-        },
-        Err(e) => BackendActionResult {
-            ok: false,
-            mode: "sidecar",
-            message: format!("停止失败：{e}"),
-        },
+        Ok(()) => BackendActionResult { ok: true, mode: "stopped", message: "已停止后端。".into() },
+        Err(e) => BackendActionResult { ok: false, mode: "sidecar", message: format!("停止失败：{e}") },
+    }
+}
+
+/// Best-effort terminate on app exit; second call on an empty slot is a no-op.
+fn terminate_slot(slot: &Mutex<Option<CommandChild>>) {
+    if let Some(child) = slot.lock().unwrap().take() {
+        let _ = terminate_backend(child.pid(), child);
     }
 }
 
@@ -209,49 +288,80 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(BackendProcess::default())
+        .manage(RealBackendProcess::default())
         .invoke_handler(tauri::generate_handler![
             get_api_base_url,
             get_runtime_info,
             get_backend_status,
             start_backend,
             stop_backend,
+            get_real_backend_status,
+            start_real_backend,
+            stop_real_backend,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running LUNARIS Tauri shell");
+        .build(tauri::generate_context!())
+        .expect("error while running LUNARIS Tauri shell")
+        .run(|app_handle, event| {
+            // On exit, stop any sidecars Tauri started so they don't leak ports.
+            if matches!(event, tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit) {
+                terminate_slot(&app_handle.state::<BackendProcess>().0);
+                terminate_slot(&app_handle.state::<RealBackendProcess>().0);
+            }
+        });
 }
 
 #[cfg(test)]
 mod sidecar_tests {
     use super::*;
-    use tauri::Manager;
     use std::path::PathBuf;
     use std::process::Command as StdCommand;
     use std::time::Duration;
+    use tauri::Manager;
 
-    const TEST_PORT: u16 = 8799;
-
-    /// plugin-shell resolves the sidecar relative to the current exe; under
-    /// `cargo test` that's target/debug/deps/, so place the verified binary there.
-    fn stage_sidecar() {
+    /// plugin-shell resolves a sidecar relative to the current exe; under
+    /// `cargo test` that's target/debug/deps/, so stage the verified binary there.
+    fn stage_sidecar(triple_name: &str, link_name: &str) {
         let src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("binaries/lunaris-hello-backend-aarch64-apple-darwin");
+            .join("binaries")
+            .join(triple_name);
         let exe_dir = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
-        std::fs::copy(&src, exe_dir.join("lunaris-hello-backend")).expect("stage sidecar");
+        std::fs::copy(&src, exe_dir.join(link_name)).expect("stage sidecar");
     }
 
-    fn curl_health() -> Option<String> {
+    fn curl_health(port: u16) -> Option<String> {
         let out = StdCommand::new("curl")
-            .args(["-s", "-m", "3", &format!("http://127.0.0.1:{TEST_PORT}/api/health")])
+            .args(["-s", "-m", "3", &format!("http://127.0.0.1:{port}/api/health")])
             .output()
             .ok()?;
         let body = String::from_utf8_lossy(&out.stdout).to_string();
         (!body.trim().is_empty()).then_some(body)
     }
 
+    fn poll_health(port: u16, attempts: u32) -> Option<String> {
+        for _ in 0..attempts {
+            std::thread::sleep(Duration::from_millis(800));
+            if let Some(body) = curl_health(port) {
+                return Some(body);
+            }
+        }
+        None
+    }
+
+    fn wait_port_freed(port: u16) -> bool {
+        for _ in 0..10 {
+            std::thread::sleep(Duration::from_millis(500));
+            if curl_health(port).is_none() {
+                return true;
+            }
+        }
+        false
+    }
+
     #[test]
-    fn sidecar_spawn_health_kill() {
-        stage_sidecar();
-        std::env::set_var("LUNARIS_PORT", TEST_PORT.to_string());
+    fn hello_sidecar_spawn_health_kill() {
+        const PORT: u16 = 8799;
+        stage_sidecar("lunaris-hello-backend-aarch64-apple-darwin", "lunaris-hello-backend");
+        std::env::set_var("LUNARIS_PORT", PORT.to_string());
 
         let app = tauri::test::mock_builder()
             .plugin(tauri_plugin_shell::init())
@@ -264,35 +374,48 @@ mod sidecar_tests {
         assert!(start.ok, "start_backend failed: {}", start.message);
 
         let st = get_backend_status(app.state());
-        assert!(st.running && st.pid.is_some(), "expected running, got {st:?}", st = (st.running, st.pid));
+        assert!(st.running && st.pid.is_some(), "expected running");
 
-        // PyInstaller onefile cold start (unpack + import) can take ~10s.
-        let mut health = None;
-        for _ in 0..25 {
-            std::thread::sleep(Duration::from_millis(800));
-            health = curl_health();
-            if health.is_some() {
-                break;
-            }
-        }
-        let body = health.expect("/api/health did not respond before timeout");
+        let body = poll_health(PORT, 25).expect("/api/health did not respond before timeout");
         assert!(body.contains("\"status\":\"ok\""), "unexpected health body: {body}");
 
         let stop = stop_backend(app.state());
         assert!(stop.ok, "stop_backend failed: {}", stop.message);
+        assert!(wait_port_freed(PORT), "hello port not released after stop");
+        assert!(!get_backend_status(app.state()).running, "expected stopped");
+    }
 
-        // The real server child (not just internal state) must release the port.
-        let mut freed = false;
-        for _ in 0..10 {
-            std::thread::sleep(Duration::from_millis(500));
-            if curl_health().is_none() {
-                freed = true;
-                break;
-            }
-        }
-        assert!(freed, "/api/health still served after stop_backend: port not released");
+    #[test]
+    fn real_sidecar_spawn_health_kill() {
+        const PORT: u16 = 18799;
+        stage_sidecar("lunaris-real-backend-aarch64-apple-darwin", "lunaris-real-backend");
+        std::env::set_var("LUNARIS_REAL_PORT", PORT.to_string());
+        std::env::set_var(
+            "LUNARIS_DATA_DIR",
+            std::env::temp_dir().join("lunaris-real-test").to_string_lossy().to_string(),
+        );
 
-        let st2 = get_backend_status(app.state());
-        assert!(!st2.running, "expected stopped after stop_backend");
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_shell::init())
+            .manage(RealBackendProcess::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build mock app");
+        let handle = app.handle().clone();
+
+        let start = start_real_backend(handle, app.state());
+        assert!(start.ok, "start_real_backend failed: {}", start.message);
+
+        let st = get_real_backend_status(app.state());
+        assert!(st.running && st.pid.is_some(), "expected real backend running");
+
+        // Real backend cold start (unpack + sqlalchemy/pydantic import) is heavier.
+        let body = poll_health(PORT, 30).expect("/api/health did not respond before timeout");
+        assert!(body.contains("\"status\":\"ok\""), "unexpected health body: {body}");
+
+        let stop = stop_real_backend(app.state());
+        assert!(stop.ok, "stop_real_backend failed: {}", stop.message);
+        assert!(wait_port_freed(PORT), "real port not released after stop");
+        assert!(!get_real_backend_status(app.state()).running, "expected stopped");
     }
 }
+

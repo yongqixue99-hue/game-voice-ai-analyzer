@@ -25,6 +25,9 @@
   "bundle": {
     "active": false,
     "targets": "all",
-    "externalBin": ["binaries/lunaris-hello-backend"]
+    "externalBin": [
+      "binaries/lunaris-hello-backend",
+      "binaries/lunaris-real-backend"
+    ]
   }
 }
