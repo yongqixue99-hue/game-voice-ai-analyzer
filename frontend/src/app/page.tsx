@@ -353,8 +353,16 @@ type TauriRuntimeInfo = {
 
 type TauriBackendStatus = {
   mode: string;
-  note: string;
+  running: boolean;
+  pid: number | null;
   api_base_url: string;
+  note: string;
+};
+
+type TauriBackendActionResult = {
+  ok: boolean;
+  mode: string;
+  message: string;
 };
 
 const apiBaseUrlSourceLabel: Record<TauriApiBaseUrlInfo["source"], string> = {
@@ -1471,6 +1479,9 @@ export default function Home() {
     useState<TauriRuntimeInfo | null>(null);
   const [tauriBackendStatus, setTauriBackendStatus] =
     useState<TauriBackendStatus | null>(null);
+  const [tauriBackendActionPending, setTauriBackendActionPending] =
+    useState(false);
+  const [tauriBackendActionError, setTauriBackendActionError] = useState("");
   const [backendHealthStatus, setBackendHealthStatus] =
     useState<BackendHealthStatus>("checking");
   const [backendHealth, setBackendHealth] = useState<BackendHealth | null>(null);
@@ -1578,6 +1589,27 @@ export default function Home() {
       );
     }
   }, []);
+
+  const refreshBackendStatus = useCallback(async () => {
+    const status = await invokeTauri<TauriBackendStatus>("get_backend_status");
+    if (status) setTauriBackendStatus(status);
+  }, []);
+
+  const runBackendAction = useCallback(
+    async (cmd: "start_backend" | "stop_backend") => {
+      setTauriBackendActionPending(true);
+      setTauriBackendActionError("");
+      const result = await invokeTauri<TauriBackendActionResult>(cmd);
+      if (!result) {
+        setTauriBackendActionError("无法调用 Tauri 控制面命令。");
+      } else if (!result.ok) {
+        setTauriBackendActionError(result.message);
+      }
+      await refreshBackendStatus();
+      setTauriBackendActionPending(false);
+    },
+    [refreshBackendStatus],
+  );
 
   useEffect(() => {
     void loadRecordings();
@@ -5058,7 +5090,57 @@ export default function Home() {
                     ? tauriBackendStatus?.mode ?? "查询中"
                     : "manual-dev"}
                 </StatusPill>
-                <StatusPill tone="neutral">占位，生产版待实现</StatusPill>
+              </SettingRow>
+
+              <SettingRow
+                description={
+                  runtimeEnvironment === "Tauri"
+                    ? tauriBackendActionError
+                      ? tauriBackendActionError
+                      : tauriBackendStatus
+                        ? `${tauriBackendStatus.running ? "running" : "stopped"}${
+                            tauriBackendStatus.pid != null
+                              ? ` · pid ${tauriBackendStatus.pid}`
+                              : ""
+                          } · ${tauriBackendStatus.api_base_url}`
+                        : "正在查询后端进程状态…"
+                    : "Browser 模式下无法由 Tauri 启停后端。"
+                }
+                title="后端进程控制"
+              >
+                <StatusPill
+                  tone={tauriBackendStatus?.running ? "success" : "neutral"}
+                >
+                  {tauriBackendStatus?.running ? "running" : "stopped"}
+                </StatusPill>
+                <button
+                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:opacity-50"
+                  type="button"
+                  disabled={
+                    runtimeEnvironment !== "Tauri" ||
+                    tauriBackendActionPending ||
+                    (tauriBackendStatus?.running ?? false)
+                  }
+                  onClick={() => {
+                    void runBackendAction("start_backend");
+                  }}
+                >
+                  启动后端
+                </button>
+                <button
+                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:opacity-50"
+                  type="button"
+                  disabled={
+                    runtimeEnvironment !== "Tauri" ||
+                    tauriBackendActionPending ||
+                    !(tauriBackendStatus?.running ?? false)
+                  }
+                  onClick={() => {
+                    void runBackendAction("stop_backend");
+                  }}
+                >
+                  停止后端
+                </button>
               </SettingRow>
 
               {runtimeEnvironment === "Tauri" && tauriRuntimeInfo ? (
