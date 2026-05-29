@@ -7,7 +7,7 @@
 
 - 项目名称：LUNARIS（游戏语音录音 / 转写 / AI 总结桌面应用）
 - 项目路径：`/Users/xueyongqi/project/project-2`
-- 当前阶段：Tauri Shell MVP 已通过本机人工验证，进入「开发体验优化」阶段
+- 当前阶段：Tauri Shell MVP 已通过本机人工验证；开发环境一键启动脚本已上线，进入「桌面端启动链路与生产打包设计」阶段
 - 当前主要目标：在不动业务逻辑的前提下，优化开发期一键启动体验，并规划生产打包方案
 - 当前推荐开发方式：Claude Code 命令行（真实终端），不要在 Claude 桌面端沙箱里跑 dev server
 
@@ -97,7 +97,8 @@ LUNARIS 旨在成为一个面向游戏 / 多人语音场景的桌面级语音分
 - 重要提交：
   - `b450123` 完成 Web MVP 与 Tauri shell MVP 初版（Codex / Claude 桌面端阶段）
   - `d44c4d2` 修复 Tauri 启动链路：补齐 icons/icon.png 占位资源（Claude Code 真实终端首次完整验证）
-  - 本次提交：新增项目交接文档（hash 提交后补充）
+  - `143dab5` 新增项目交接文档
+  - 本次提交：新增开发环境一键启动脚本（hash 提交后补充）
 
 ## 7. 当前验证结果
 
@@ -118,6 +119,23 @@ LUNARIS 旨在成为一个面向游戏 / 多人语音场景的桌面级语音分
 - 前端 lint：0 errors（仅 1 个 `target/debug` 内部生成文件 warning，与项目代码无关）
 
 ## 8. 常用启动命令
+
+### 一键启动（推荐用于本地开发）
+
+```bash
+cd /Users/xueyongqi/project/project-2
+./scripts/dev-all.sh
+```
+
+`scripts/dev-all.sh` 会按顺序拉起 backend（uvicorn :8000）、frontend（next dev :3000）、tauri dev，
+日志合并到当前终端并带彩色前缀 `[backend] / [frontend] / [tauri]`。
+在前台运行时按 `Ctrl+C` 会统一清理三个子进程及其后代（包括 cargo / lunaris-desktop），不留残留。
+启动前会自动检查：`backend/.venv`、`frontend/node_modules`、`cargo`、端口 3000/8000 是否被占用，
+有任何前置缺失会提示并退出。
+
+该脚本仅用于开发环境，不是生产打包方案；现有手动三终端启动方式继续可用，互不影响。
+
+### 手动三终端启动（保留）
 
 后端：
 
@@ -187,13 +205,11 @@ git log --oneline -5
 
 当前需要同时开三个终端（uvicorn / Next dev / Tauri dev）。下一步**先不要做复杂打包**，也不要急着把 Python 后端塞进 Tauri。先做低风险的开发体验优化。
 
-#### 优先级 A：开发期一键启动脚本
+### 下一阶段目标：桌面端启动链路与生产打包设计
 
-- 一键启动 backend + frontend + tauri dev
-- 不影响现有手动启动方式
-- 不改业务逻辑
-- 候选方案：根目录 `package.json` scripts、`scripts/dev-all.sh`、`concurrently`、Tauri `beforeDevCommand`
-- 在动手前需先输出方案对比并经用户确认
+开发期一键启动已完成（见 `scripts/dev-all.sh`）。下一步聚焦：
+
+#### 优先级 A：~~开发期一键启动脚本~~ ✅ 已完成（`scripts/dev-all.sh`）
 
 #### 优先级 B：Tauri 生产版后端启动方案（仅设计，不实现）
 
