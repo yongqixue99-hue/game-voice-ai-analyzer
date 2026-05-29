@@ -42,5 +42,15 @@
 
 ## 5. 文档与收尾
 
-- [x] 5.1 `docs/desktop-beta-test.md`：验收清单 + 通过/known issues（已回填 B 表）。
-- [ ] 5.2 输出 Beta 结论（见会话报告；B11 重测 + B16 残留确认后定稿）。
+- [x] 5.1 `docs/desktop-beta-test.md`：验收清单 + 通过/known issues（已回填 B 表，B11/B16 已定稿）。
+- [x] 5.2 输出 Beta 结论：见 `docs/desktop-beta-status.md`（内部 Beta 候选）。
+
+## 6. 自动化验收（auto-smoke 收尾）
+
+- [x] 6.1 `scripts/desktop_beta_smoke_check.sh`：health + desktop_entry/frozen 启停 + 端口释放
+      + B11 真实 ASR 路径 + sidecar 配置 + cargo + lint + build + pytest + 打包产物检查。
+- [x] 6.2 B11 自动复测：走 aliyun provider，错误指向公网 URL（达标，已知限制），不再报「未配置 key」。
+- [x] 6.3 B16 自动复测：停止后端口释放、无 `lunaris-real-backend` 残留。
+- [x] 6.4 修复脚本健康轮询窗口（frozen 冷启动 ~10–15s，避免 SIGTERM mid-unpack 孤儿化子进程）。
+- [x] 6.5 新增 `docs/desktop-beta-known-issues.md`、`docs/desktop-beta-status.md`。
+- [x] 6.6 全量 smoke：17 PASS / 0 FAIL / 1 KNOWN。

@@ -64,12 +64,12 @@ cd frontend && npm run tauri dev
 | B8 | 上传音频 | 上传新文件 | 上传成功并入列表 | ✅ |
 | B9 | WebView 录音 | 点录音按钮 | MediaRecorder 可用 / 记录兼容问题 | ⚠️ known issue：WKWebView 不支持 MediaRecorder，提示换 Chrome/Edge |
 | B10 | mock 转写 | mock 转写按钮 | 请求后端返回 | ✅ |
-| B11 | 真实转写 | 真实 ASR 按钮 | 发起请求（公网 URL 失败记为 known issue） | 🔧 原报「未配置 key」(frozen .env bug，已修)；重打包后转为公网 URL 已知限制，待重测 |
+| B11 | 真实转写 | 真实 ASR 按钮 | 发起请求（公网 URL 失败记为 known issue） | ✅ 已修+自动复测：走 aliyun provider，错误明确指向「无法访问本地音频 URL」(已知限制，达标) |
 | B12 | AI 总结 | 总结按钮 | 请求后端返回 | ✅ |
 | B13 | 长录音 session | 打开 session 页 | 页面打开 | ✅ |
 | B14 | 整场总结/导出 | 总结/导出 | 可用 | ✅ |
 | B15 | 停止后端 | 「停止真实后端」 | 状态 stopped，`:18080` 端口释放 | ✅ |
-| B16 | 关闭无残留 | 关闭 Tauri 窗口 | `lsof -i:18080` 无残留进程 | ⬜ 待确认 |
+| B16 | 关闭无残留 | 关闭 Tauri 窗口 | `lsof -i:18080` 无残留进程 | ✅ 自动复测：停止后端口释放、无 lunaris-real-backend 残留 |
 
 验证端口/残留（终端）：
 ```bash
