@@ -26,5 +26,11 @@ frontend/src-tauri/binaries/
 backend/.venv/
 dist/
 build/
+
+# 真实后端 PyInstaller 产物（P6+，二进制/打包目录不入库；.spec 仍可入库）
+backend/dist/
+backend/build/
+experiments/*/dist/
+experiments/*/build/
 frontend/.next-dev.log
 frontend/src-tauri/gen/
