@@ -4,6 +4,8 @@
   "version": "0.1.0",
   "identifier": "com.lunaris.voice-analyzer",
   "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
     "devUrl": "http://localhost:3000",
     "frontendDist": "../out"
   },
@@ -23,8 +25,8 @@
     }
   },
   "bundle": {
-    "active": false,
-    "targets": "all",
+    "active": true,
+    "targets": "app",
     "externalBin": [
       "binaries/lunaris-hello-backend",
       "binaries/lunaris-real-backend"

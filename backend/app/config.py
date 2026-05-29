@@ -54,10 +54,21 @@ class Settings:
 
 def get_settings() -> Settings:
     project_root = Path(__file__).resolve().parents[2]
+    # Source-tree .env (dev). setdefault semantics: first writer wins, so these
+    # take priority over the data-dir .env loaded below.
     load_env_file(project_root / ".env")
     load_env_file(project_root / "backend" / ".env")
 
     data_paths = resolve_data_paths(project_root)
+    # Desktop/frozen fallback: when LUNARIS_DATA_DIR is set, also read .env from
+    # the data dir. In a PyInstaller binary `__file__` points at the temp unpack
+    # dir, so the source-tree .env above is unreachable and keys (e.g.
+    # DASHSCOPE_API_KEY) would be missing. Users drop a .env into the data dir's
+    # config/ (or its root) to supply credentials without rebuilding the binary.
+    if data_paths.data_dir is not None:
+        load_env_file(data_paths.config_dir / ".env")
+        load_env_file(data_paths.data_dir / ".env")
+
     max_upload_bytes = int(os.getenv("MAX_UPLOAD_BYTES", str(100 * 1024 * 1024)))
 
     return Settings(

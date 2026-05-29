@@ -65,6 +65,17 @@ def main() -> None:
     log.info("data_dir=%s", paths.data_dir or "<dev source tree>")
     log.info("database_url=%s", settings.database_url)
     log.info("audio_storage_dir=%s", settings.audio_storage_dir)
+    # Surface where to drop credentials: when frozen, the source-tree .env is
+    # unreachable, so keys (DASHSCOPE_API_KEY etc.) must live in the data dir.
+    if paths.data_dir is not None:
+        env_file = paths.config_dir / ".env"
+        log.info(
+            "credentials .env: %s (%s)",
+            env_file,
+            "found" if env_file.exists() else "missing — real ASR/LLM keys unset",
+        )
+    log.info("asr_provider=%s, dashscope key=%s", settings.asr_provider,
+             "set" if settings.dashscope_api_key else "unset")
     log.info("binding http://%s:%s (health: /api/health)", host, port)
 
     import uvicorn

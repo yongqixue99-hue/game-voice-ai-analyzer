@@ -328,6 +328,19 @@ function getApiBaseUrl() {
   return fallbackApiBaseUrl;
 }
 
+/**
+ * Point the runtime API base at a specific URL (or clear the override to fall
+ * back to the default). Used in Tauri to route requests at the real backend
+ * sidecar (e.g. http://127.0.0.1:18080) while it is running. No-op on server.
+ */
+function setRuntimeApiBaseUrl(url: string | null) {
+  if (typeof window === "undefined") return;
+  window.__LUNARIS_CONFIG__ = {
+    ...window.__LUNARIS_CONFIG__,
+    apiBaseUrl: url ?? undefined,
+  };
+}
+
 function detectRuntimeEnvironment(): RuntimeEnvironment {
   if (
     typeof window !== "undefined" &&
@@ -1605,7 +1618,12 @@ export default function Home() {
     const status = await invokeTauri<TauriBackendStatus>(
       "get_real_backend_status",
     );
-    if (status) setTauriRealBackendStatus(status);
+    if (status) {
+      setTauriRealBackendStatus(status);
+      // Route requests at the real sidecar while it runs; clear when stopped so
+      // we fall back to the default base (dev backend / NEXT_PUBLIC override).
+      setRuntimeApiBaseUrl(status.running ? status.api_base_url : null);
+    }
   }, []);
 
   const runBackendAction = useCallback(
@@ -1634,10 +1652,20 @@ export default function Home() {
       } else if (!result.ok) {
         setTauriRealBackendActionError(result.message);
       }
+      // refreshRealBackendStatus repoints the API base at the sidecar (or clears
+      // it on stop); re-check health + reload data against the new base.
       await refreshRealBackendStatus();
+      await checkBackendHealth();
+      await loadRecordings();
+      await loadRecordingSessions();
       setTauriRealBackendActionPending(false);
     },
-    [refreshRealBackendStatus],
+    [
+      refreshRealBackendStatus,
+      checkBackendHealth,
+      loadRecordings,
+      loadRecordingSessions,
+    ],
   );
 
   useEffect(() => {
@@ -1662,13 +1690,9 @@ export default function Home() {
       void invokeTauri<TauriBackendStatus>("get_backend_status").then((v) => {
         if (v) setTauriBackendStatus(v);
       });
-      void invokeTauri<TauriBackendStatus>("get_real_backend_status").then(
-        (v) => {
-          if (v) setTauriRealBackendStatus(v);
-        },
-      );
+      void refreshRealBackendStatus();
     }
-  }, [checkBackendHealth]);
+  }, [checkBackendHealth, refreshRealBackendStatus]);
 
   const clearBrowserRecordingTimer = useCallback(() => {
     if (browserRecordingTimerRef.current !== null) {
