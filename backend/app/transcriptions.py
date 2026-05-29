@@ -45,7 +45,7 @@ def persist_asr_segments(
         db.execute(
             delete(TranscriptSegment).where(
                 TranscriptSegment.recording_id == recording.id,
-                TranscriptSegment.source.in_(("mock", "aliyun")),
+                TranscriptSegment.source.in_(("mock", "aliyun", "funasr_http")),
             )
         )
         db.add_all(segments)

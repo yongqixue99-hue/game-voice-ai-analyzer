@@ -6,6 +6,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -113,7 +114,8 @@ class AliyunASRProvider:
         if hostname in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}:
             raise ASRProviderError(
                 400,
-                "阿里云无法访问本地音频 URL，请将 PUBLIC_BASE_URL 配置为 ngrok、localtunnel 或 Cloudflare Tunnel 的公网地址。",
+                "阿里云 ASR 无法访问本地音频文件。请配置 PUBLIC_BASE_URL / localtunnel / "
+                "OSS 公网 URL，或切换到 FunASR HTTP Provider（ASR_PROVIDER=funasr_http）。",
             )
 
     def _submit_task(self, public_audio_url: str) -> str:
@@ -241,6 +243,193 @@ class AliyunASRProvider:
         return decoded
 
 
+class FunasrHttpASRProvider:
+    """Local / LAN FunASR HTTP provider.
+
+    Unlike aliyun (which downloads a public URL), FunASR receives the audio
+    bytes directly via multipart upload, so it works for desktop local files
+    with no public URL. LUNARIS only *calls* the FunASR HTTP service; deploying
+    FunASR (on this machine / a LAN box / a GPU server) is out of scope.
+    """
+
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+
+    def transcribe(
+        self, recording: Recording, public_audio_url: str
+    ) -> list[ASRSegment]:
+        # Local import avoids pulling the recordings router module into asr.py.
+        from .recordings import resolve_recording_path
+
+        audio_path = resolve_recording_path(recording)
+        if not audio_path.exists() or not audio_path.is_file():
+            raise ASRProviderError(404, "录音文件不存在，无法发送给 FunASR。")
+
+        url = f"{self.settings.funasr_http_base_url}{self.settings.funasr_http_transcribe_path}"
+        body, content_type = _build_multipart_body(
+            field_name="audio",
+            filename=audio_path.name,
+            file_bytes=audio_path.read_bytes(),
+        )
+
+        request = urllib.request.Request(
+            url,
+            data=body,
+            headers={"Content-Type": content_type},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(
+                request, timeout=self.settings.funasr_http_timeout_seconds
+            ) as response:
+                raw = response.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as error:
+            detail = error.read().decode("utf-8", errors="replace")
+            raise ASRProviderError(
+                502, f"FunASR 请求失败：HTTP {error.code} {detail[:500]}"
+            ) from error
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            reason = getattr(error, "reason", error)
+            raise ASRProviderError(
+                503,
+                "FunASR 服务未连接，请先启动本地或局域网 FunASR HTTP 服务。"
+                f"（{self.settings.funasr_http_base_url}，{reason}）",
+            ) from error
+
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as error:
+            logger.error("FunASR returned non-JSON response: %s", raw[:1000])
+            raise ASRProviderError(502, "FunASR 返回了无法解析的 JSON。") from error
+
+        segments = parse_funasr_response(payload, recording)
+        if not segments:
+            logger.error("FunASR returned no usable segments: %s", raw[:1000])
+            raise ASRProviderError(
+                400, "FunASR 返回结果为空或缺少可用文本，无法生成转写时间轴。"
+            )
+        return sorted(segments, key=lambda s: (s.start_time, s.end_time))
+
+
+def _build_multipart_body(
+    field_name: str, filename: str, file_bytes: bytes
+) -> tuple[bytes, str]:
+    """Build a minimal multipart/form-data body using stdlib only."""
+
+    boundary = f"----LunarisFunASR{uuid.uuid4().hex}"
+    head = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="{field_name}"; filename="{filename}"\r\n'
+        f"Content-Type: application/octet-stream\r\n\r\n"
+    ).encode("utf-8")
+    tail = f"\r\n--{boundary}--\r\n".encode("utf-8")
+    return head + file_bytes + tail, f"multipart/form-data; boundary={boundary}"
+
+
+def _funasr_time_to_seconds(value: Any, *, is_millis: bool) -> float | None:
+    """Convert a FunASR timestamp to seconds.
+
+    Unit is decided by field-name convention (passed via ``is_millis``):
+    ``begin_time``/``end_time`` are milliseconds (like aliyun), while
+    ``start``/``end`` are seconds. As a safety net, a value that is implausibly
+    large for seconds (>= 3600 on a field declared as seconds) is also treated
+    as milliseconds.
+    """
+
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if is_millis or number >= 3600:
+        return number / 1000.0
+    return number
+
+
+def _extract_funasr_segment_list(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        for key in ("segments", "sentences", "result", "results"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                items = [item for item in value if isinstance(item, dict)]
+                if items:
+                    return items
+    return []
+
+
+def parse_funasr_response(payload: Any, recording: Recording) -> list[ASRSegment]:
+    """Convert a (tolerant) FunASR JSON response into unified ASRSegments."""
+
+    items = _extract_funasr_segment_list(payload)
+    segments: list[ASRSegment] = []
+
+    for index, item in enumerate(items, start=1):
+        text = item.get("text") or item.get("value") or item.get("sentence")
+        if not isinstance(text, str) or not text.strip():
+            continue
+
+        # Field-name convention decides the unit: begin_time/end_time are ms,
+        # start/end/ts/te are seconds.
+        start_time = end_time = None
+        for key, is_ms in (
+            ("start", False),
+            ("start_time", False),
+            ("ts", False),
+            ("begin_time", True),
+        ):
+            if item.get(key) is not None:
+                start_time = _funasr_time_to_seconds(item[key], is_millis=is_ms)
+                break
+        for key, is_ms in (
+            ("end", False),
+            ("end_time_s", False),
+            ("te", False),
+            ("end_time", True),
+        ):
+            if item.get(key) is not None:
+                end_time = _funasr_time_to_seconds(item[key], is_millis=is_ms)
+                break
+        if start_time is None:
+            start_time = 0.0
+        if end_time is None or end_time < start_time:
+            end_time = start_time
+
+        speaker = item.get("speaker") or item.get("speaker_label")
+        if not (isinstance(speaker, str) and speaker.strip()):
+            spk = item.get("spk")
+            speaker = f"Speaker {spk}" if spk is not None else f"Speaker {index}"
+
+        segments.append(
+            ASRSegment(
+                speaker_label=str(speaker).strip(),
+                start_time=start_time,
+                end_time=end_time,
+                text=text.strip(),
+                source="funasr_http",
+            )
+        )
+
+    # Fallback: a plain full-text response with no per-segment timestamps.
+    if not segments:
+        full_text = None
+        if isinstance(payload, dict):
+            full_text = payload.get("text") or payload.get("transcript")
+        if isinstance(full_text, str) and full_text.strip():
+            duration = recording.duration or 0.0
+            segments.append(
+                ASRSegment(
+                    speaker_label="Speaker 1",
+                    start_time=0.0,
+                    end_time=float(duration),
+                    text=full_text.strip(),
+                    source="funasr_http",
+                )
+            )
+
+    return segments
+
+
 def parse_aliyun_transcription_json(payload: dict[str, Any]) -> list[ASRSegment]:
     transcripts = extract_transcripts(payload)
     segments: list[ASRSegment] = []
@@ -363,8 +552,11 @@ def get_asr_provider(settings: Settings | None = None) -> ASRProvider:
         return MockASRProvider()
     if resolved_settings.asr_provider == "aliyun":
         return AliyunASRProvider(resolved_settings)
+    if resolved_settings.asr_provider == "funasr_http":
+        return FunasrHttpASRProvider(resolved_settings)
 
     raise ASRProviderError(
         400,
-        f"不支持的 ASR_PROVIDER：{resolved_settings.asr_provider}。",
+        f"不支持的 ASR_PROVIDER：{resolved_settings.asr_provider}。"
+        "可选 mock / aliyun / funasr_http。",
     )

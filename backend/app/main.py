@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .analyses import router as analyses_router
+from .asr_status import router as asr_status_router
 from .database import init_db, settings
 from .recording_sessions import router as recording_sessions_router
 from .recordings import router as recordings_router
@@ -56,3 +57,4 @@ app.include_router(session_summaries_router)
 app.include_router(segments_router)
 app.include_router(transcriptions_router)
 app.include_router(analyses_router)
+app.include_router(asr_status_router)

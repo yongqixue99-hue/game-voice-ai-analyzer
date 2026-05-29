@@ -528,7 +528,8 @@ def test_transcribe_with_local_public_base_url_returns_clear_error(
     response = client.post(f"/api/recordings/{recording_id}/transcribe")
 
     assert response.status_code == 400
-    assert "阿里云无法访问本地音频 URL" in response.json()["detail"]
+    assert "阿里云 ASR 无法访问本地音频文件" in response.json()["detail"]
+    assert "FunASR HTTP Provider" in response.json()["detail"]
 
 
 def test_parse_aliyun_transcription_json_converts_sentences_to_segments() -> None:

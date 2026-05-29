@@ -43,6 +43,9 @@ class Settings:
     aliyun_asr_poll_interval_seconds: float
     aliyun_asr_max_polls: int
     aliyun_asr_request_timeout_seconds: float
+    funasr_http_base_url: str
+    funasr_http_transcribe_path: str
+    funasr_http_timeout_seconds: float
     llm_provider: str
     dashscope_llm_model: str
     dashscope_llm_base_url: str
@@ -110,6 +113,14 @@ def get_settings() -> Settings:
         aliyun_asr_max_polls=int(os.getenv("ALIYUN_ASR_MAX_POLLS", "60")),
         aliyun_asr_request_timeout_seconds=float(
             os.getenv("ALIYUN_ASR_REQUEST_TIMEOUT_SECONDS", "30")
+        ),
+        funasr_http_base_url=os.getenv(
+            "FUNASR_HTTP_BASE_URL", "http://127.0.0.1:10095"
+        ).rstrip("/"),
+        funasr_http_transcribe_path="/"
+        + os.getenv("FUNASR_HTTP_TRANSCRIBE_PATH", "/asr").lstrip("/"),
+        funasr_http_timeout_seconds=float(
+            os.getenv("FUNASR_HTTP_TIMEOUT_SECONDS", "120")
         ),
         llm_provider=os.getenv("LLM_PROVIDER", "mock").strip().lower(),
         dashscope_llm_model=os.getenv("DASHSCOPE_LLM_MODEL", "qwen-plus"),

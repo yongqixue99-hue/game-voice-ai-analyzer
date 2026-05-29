@@ -213,6 +213,23 @@ type BackendHealth = {
   version: string;
 };
 
+type AsrStatus = {
+  asr_provider: string;
+  supported_providers: string[];
+  aliyun: {
+    api_key_configured: boolean;
+    model: string;
+    public_base_url: string;
+    public_url_is_local: boolean;
+  };
+  funasr_http: {
+    base_url: string;
+    transcribe_path: string;
+    reachable: boolean;
+    detail: string;
+  };
+};
+
 declare global {
   interface Window {
     __LUNARIS_CONFIG__?: {
@@ -486,6 +503,14 @@ async function fetchBackendHealth() {
     {},
     "后端健康检查失败。",
     healthTimeoutMs,
+  );
+}
+
+async function fetchAsrStatus() {
+  return requestJson<AsrStatus>(
+    "/api/asr/status",
+    {},
+    "ASR Provider 状态加载失败。",
   );
 }
 
@@ -1505,6 +1530,7 @@ export default function Home() {
     useState<BackendHealthStatus>("checking");
   const [backendHealth, setBackendHealth] = useState<BackendHealth | null>(null);
   const [backendHealthError, setBackendHealthError] = useState("");
+  const [asrStatus, setAsrStatus] = useState<AsrStatus | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -1600,6 +1626,10 @@ export default function Home() {
       const health = await fetchBackendHealth();
       setBackendHealth(health);
       setBackendHealthStatus("connected");
+      // ASR provider status is informational; never fail health on its account.
+      void fetchAsrStatus()
+        .then(setAsrStatus)
+        .catch(() => setAsrStatus(null));
     } catch (error) {
       setBackendHealth(null);
       setBackendHealthStatus("disconnected");
@@ -4997,6 +5027,42 @@ export default function Home() {
                   ))}
                 </div>
                 <StatusPill tone="neutral">按 .env 生效</StatusPill>
+              </SettingRow>
+
+              <SettingRow
+                description={
+                  asrStatus
+                    ? `当前 Provider: ${asrStatus.asr_provider} · 阿里云 Key: ${
+                        asrStatus.aliyun.api_key_configured ? "已配置" : "未配置"
+                      }${
+                        asrStatus.aliyun.public_url_is_local
+                          ? "（公网 URL 为本地，云端不可达）"
+                          : ""
+                      } · FunASR: ${asrStatus.funasr_http.base_url}（${
+                        asrStatus.funasr_http.reachable ? "已连接" : "未连接"
+                      }）`
+                    : "后端连接后显示当前 ASR Provider 与 FunASR 服务状态。"
+                }
+                title="ASR Provider 状态"
+              >
+                <StatusPill
+                  tone={
+                    !asrStatus
+                      ? "neutral"
+                      : asrStatus.asr_provider === "funasr_http"
+                        ? asrStatus.funasr_http.reachable
+                          ? "success"
+                          : "warning"
+                        : asrStatus.asr_provider === "aliyun"
+                          ? asrStatus.aliyun.api_key_configured &&
+                            !asrStatus.aliyun.public_url_is_local
+                            ? "success"
+                            : "warning"
+                          : "neutral"
+                  }
+                >
+                  {asrStatus ? asrStatus.asr_provider : "未知"}
+                </StatusPill>
               </SettingRow>
 
               <SettingRow
