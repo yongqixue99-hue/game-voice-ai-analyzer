@@ -7,7 +7,7 @@
 
 - 项目名称：LUNARIS（游戏语音录音 / 转写 / AI 总结桌面应用）
 - 项目路径：`/Users/xueyongqi/project/project-2`
-- 当前阶段：Tauri Shell MVP 已通过本机人工验证；开发环境一键启动脚本已上线，进入「桌面端启动链路与生产打包设计」阶段
+- 当前阶段：Tauri Shell MVP 已验证 + 开发期一键启动脚本已上线；当前进入「生产版后端启动方案设计」阶段（仅设计，不实现）
 - 当前主要目标：在不动业务逻辑的前提下，优化开发期一键启动体验，并规划生产打包方案
 - 当前推荐开发方式：Claude Code 命令行（真实终端），不要在 Claude 桌面端沙箱里跑 dev server
 
@@ -88,6 +88,9 @@ LUNARIS 旨在成为一个面向游戏 / 多人语音场景的桌面级语音分
   - `docs/tauri-shell-mvp.md`（三终端开发启动说明）
   - `docs/manual-e2e-test.md`
   - `docs/hand_off_status.md`（本文件）
+  - `openspec/changes/tauri-prod-backend-launch-design/`（生产版后端启动方案设计，仅文档）
+    - `proposal.md` / `design.md` / `spec.md` / `tasks.md`
+    - `specs/tauri-prod-backend-launch-design/spec.md`
 - 设计稿：`design/LUNARIS-desktop-ui-handoff.md`
 - 代码内说明：`frontend/README.md`、`frontend/AGENTS.md`、`frontend/CLAUDE.md`、`backend/README.md`
 
@@ -98,7 +101,8 @@ LUNARIS 旨在成为一个面向游戏 / 多人语音场景的桌面级语音分
   - `b450123` 完成 Web MVP 与 Tauri shell MVP 初版（Codex / Claude 桌面端阶段）
   - `d44c4d2` 修复 Tauri 启动链路：补齐 icons/icon.png 占位资源（Claude Code 真实终端首次完整验证）
   - `143dab5` 新增项目交接文档
-  - 本次提交：新增开发环境一键启动脚本（hash 提交后补充）
+  - `09dc401` 新增开发环境一键启动脚本
+  - 本次提交：新增 Tauri 生产后端启动方案设计（hash 提交后补充）
 
 ## 7. 当前验证结果
 
@@ -205,13 +209,13 @@ git log --oneline -5
 
 当前需要同时开三个终端（uvicorn / Next dev / Tauri dev）。下一步**先不要做复杂打包**，也不要急着把 Python 后端塞进 Tauri。先做低风险的开发体验优化。
 
-### 下一阶段目标：桌面端启动链路与生产打包设计
+### 下一阶段目标：生产版后端启动方案（仅设计，等用户评审）
 
-开发期一键启动已完成（见 `scripts/dev-all.sh`）。下一步聚焦：
+`openspec/changes/tauri-prod-backend-launch-design/` 已产出方案对比与路线图。**本阶段只做设计文档，不写实现代码**。等用户确认推荐方案（方案 A：sidecar + PyInstaller）与 P1-P5 分阶段路线后，再为 P1 单独新建实现 change（建议命名 `tauri-prod-backend-control-plane`）。
 
 #### 优先级 A：~~开发期一键启动脚本~~ ✅ 已完成（`scripts/dev-all.sh`）
 
-#### 优先级 B：Tauri 生产版后端启动方案（仅设计，不实现）
+#### 优先级 B：~~Tauri 生产版后端启动方案（仅设计）~~ ✅ 已完成文档草案，等待用户评审
 
 - 写设计文档说明：
   - 如何让 Tauri 自动拉起 FastAPI
