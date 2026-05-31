@@ -214,18 +214,23 @@ type BackendHealth = {
 };
 
 type AsrStatus = {
+  provider?: string;
   asr_provider: string;
   supported_providers: string[];
   aliyun: {
+    configured?: boolean;
     api_key_configured: boolean;
     model: string;
     public_base_url: string;
+    public_base_url_configured?: boolean;
     public_url_is_local: boolean;
   };
   funasr_http: {
+    configured?: boolean;
     base_url: string;
     transcribe_path: string;
     reachable: boolean;
+    error?: string;
     detail: string;
   };
 };
@@ -5032,11 +5037,11 @@ export default function Home() {
               <SettingRow
                 description={
                   asrStatus
-                    ? `当前 Provider: ${asrStatus.asr_provider} · 阿里云 Key: ${
+                    ? `当前 Provider: ${asrStatus.provider ?? asrStatus.asr_provider} · 阿里云 Key: ${
                         asrStatus.aliyun.api_key_configured ? "已配置" : "未配置"
                       }${
                         asrStatus.aliyun.public_url_is_local
-                          ? "（公网 URL 为本地，云端不可达）"
+                          ? "（阿里云 ASR 无法访问本地音频，建议配置公网 URL 或切换 FunASR HTTP）"
                           : ""
                       } · FunASR: ${asrStatus.funasr_http.base_url}（${
                         asrStatus.funasr_http.reachable ? "已连接" : "未连接"
@@ -5063,6 +5068,11 @@ export default function Home() {
                 >
                   {asrStatus ? asrStatus.asr_provider : "未知"}
                 </StatusPill>
+                {asrStatus?.funasr_http.error ? (
+                  <span className="text-xs text-gray-500">
+                    {asrStatus.funasr_http.error}
+                  </span>
+                ) : null}
               </SettingRow>
 
               <SettingRow

@@ -74,11 +74,59 @@ FunASR 服务没起来时，转写返回明确错误（HTTP 503）：
 
 ### 响应格式（宽容解析）
 
-provider 对 FunASR 响应做宽容解析，依次尝试 `segments` / `sentences` / `result` / `results`
-数组；每段文本取 `text|value|sentence`，时间取 `start/end`（秒）或 `begin_time/end_time`（毫秒），
-说话人取 `speaker|speaker_label|spk`。若只返回整段纯文本无时间戳，则生成一段
+provider 对 FunASR 响应做宽容解析，依次尝试 `segments` / `sentences` / `sentence_info` /
+`result` / `results` 等常见结构；每段文本取 `text|value|sentence`，时间取 `start/end`
+（秒；大数值按毫秒兜底）或 `begin_time/end_time`（毫秒），说话人取
+`speaker|speaker_label|spk`。若只返回整段纯文本无时间戳，则生成一段
 `[0, 录音时长]`，保证可落库、可总结。真实 FunASR 服务接入后如字段不同，可在
 `backend/app/asr.py::parse_funasr_response` 微调映射。
+
+当前已覆盖的响应形态：
+
+```json
+{ "text": "...", "segments": [{ "start": 0, "end": 3000, "text": "..." }] }
+```
+
+```json
+{ "text": "...", "sentence_info": [{ "start": 0, "end": 3000, "text": "..." }] }
+```
+
+```json
+{ "result": { "text": "...", "segments": [{ "start": 0, "end": 3000, "text": "..." }] } }
+```
+
+```json
+[{ "text": "...", "sentence_info": [{ "start": 0, "end": 3000, "text": "..." }] }]
+```
+
+### Fake FunASR server（本地验证）
+
+仓库提供一个最小 Fake server，用于验证 LUNARIS 调用侧链路，不代表真实识别质量：
+
+```bash
+scripts/fake_funasr_server.py --host 127.0.0.1 --port 10095
+```
+
+接口：
+
+- `GET /health`
+- `POST /recognize`
+- `POST /asr`
+
+配合后端：
+
+```env
+ASR_PROVIDER=funasr_http
+FUNASR_HTTP_BASE_URL=http://127.0.0.1:10095
+FUNASR_HTTP_TRANSCRIBE_PATH=/recognize
+FUNASR_HTTP_TIMEOUT_SECONDS=120
+```
+
+快速 smoke check：
+
+```bash
+scripts/asr_provider_smoke_check.sh
+```
 
 ---
 

@@ -180,6 +180,63 @@ def test_funasr_mock_response_converts_to_segments() -> None:
     assert segments[0].source == "funasr_http"
 
 
+@pytest.mark.parametrize(
+    ("payload", "expected_texts"),
+    [
+        (
+            {
+                "text": "大家准备一下，我先去中路看视野",
+                "segments": [
+                    {"start": 0, "end": 3000, "text": "大家准备一下"},
+                    {"start": 3000, "end": 7000, "text": "我先去中路看视野"},
+                ],
+            },
+            ["大家准备一下", "我先去中路看视野"],
+        ),
+        (
+            {
+                "text": "句子信息",
+                "sentence_info": [
+                    {"start": 0, "end": 3000, "text": "句子信息"}
+                ],
+            },
+            ["句子信息"],
+        ),
+        (
+            {
+                "result": {
+                    "text": "嵌套结果",
+                    "segments": [{"start": 0, "end": 3000, "text": "嵌套结果"}],
+                }
+            },
+            ["嵌套结果"],
+        ),
+        (
+            [
+                {
+                    "text": "列表包装",
+                    "sentence_info": [
+                        {"start": 0, "end": 3000, "text": "列表包装"}
+                    ],
+                }
+            ],
+            ["列表包装"],
+        ),
+    ],
+)
+def test_funasr_parser_accepts_common_response_shapes(
+    payload: object, expected_texts: list[str]
+) -> None:
+    class _Rec:
+        duration = 12.0
+
+    segments = parse_funasr_response(payload, _Rec())
+    assert [segment.text for segment in segments] == expected_texts
+    assert segments[0].start_time == 0.0
+    assert segments[0].end_time == 3.0
+    assert all(segment.source == "funasr_http" for segment in segments)
+
+
 def test_funasr_plain_text_response_spans_recording() -> None:
     class _Rec:
         duration = 7.0
@@ -233,9 +290,14 @@ def test_asr_status_endpoint_reports_providers(
     response = client.get("/api/asr/status")
     assert response.status_code == 200
     data = response.json()
+    assert data["provider"] == "funasr_http"
     assert data["asr_provider"] == "funasr_http"
     assert data["supported_providers"] == ["mock", "aliyun", "funasr_http"]
+    assert data["aliyun"]["configured"] is True
     assert data["aliyun"]["api_key_configured"] is True
+    assert data["aliyun"]["public_base_url_configured"] is True
     assert data["aliyun"]["public_url_is_local"] is True
+    assert data["funasr_http"]["configured"] is True
     assert data["funasr_http"]["reachable"] is False
+    assert data["funasr_http"]["error"] == "stubbed"
     assert data["funasr_http"]["base_url"].startswith("http")

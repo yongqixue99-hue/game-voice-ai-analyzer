@@ -340,21 +340,64 @@ def _funasr_time_to_seconds(value: Any, *, is_millis: bool) -> float | None:
         number = float(value)
     except (TypeError, ValueError):
         return None
-    if is_millis or number >= 3600:
+    if is_millis or abs(number) >= 1000:
         return number / 1000.0
     return number
 
 
+def _looks_like_funasr_segment(payload: dict[str, Any]) -> bool:
+    text = payload.get("text") or payload.get("value") or payload.get("sentence")
+    has_time = any(
+        payload.get(key) is not None
+        for key in (
+            "start",
+            "start_time",
+            "ts",
+            "begin_time",
+            "end",
+            "end_time",
+            "end_time_s",
+            "te",
+        )
+    )
+    return isinstance(text, str) and bool(text.strip()) and has_time
+
+
 def _extract_funasr_segment_list(payload: Any) -> list[dict[str, Any]]:
+    """Find sentence-level lists across common FunASR wrapper shapes."""
+
+    segment_keys = ("segments", "sentences", "sentence_info")
+    wrapper_keys = ("result", "results", "data", "output")
+
     if isinstance(payload, list):
-        return [item for item in payload if isinstance(item, dict)]
+        items: list[dict[str, Any]] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            nested = _extract_funasr_segment_list(item)
+            if nested:
+                items.extend(nested)
+            elif _looks_like_funasr_segment(item):
+                items.append(item)
+        return items
+
     if isinstance(payload, dict):
-        for key in ("segments", "sentences", "result", "results"):
+        for key in segment_keys:
             value = payload.get(key)
             if isinstance(value, list):
                 items = [item for item in value if isinstance(item, dict)]
                 if items:
                     return items
+
+        for key in wrapper_keys:
+            value = payload.get(key)
+            nested = _extract_funasr_segment_list(value)
+            if nested:
+                return nested
+
+        if _looks_like_funasr_segment(payload):
+            return [payload]
+
     return []
 
 
