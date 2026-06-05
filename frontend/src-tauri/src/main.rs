@@ -5,6 +5,8 @@ use tauri::Manager;
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
 
+mod native_mic;
+
 const DEFAULT_BACKEND_PORT: u16 = 8000;
 const SIDECAR_NAME: &str = "lunaris-hello-backend";
 const DEFAULT_SIDECAR_PORT: u16 = 8765;
@@ -289,6 +291,7 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .manage(BackendProcess::default())
         .manage(RealBackendProcess::default())
+        .manage(native_mic::NativeMicRecorderState::default())
         .setup(|app| {
             let result = start_real_backend(app.handle().clone(), app.state());
             if !result.ok {
@@ -305,6 +308,10 @@ fn main() {
             get_real_backend_status,
             start_real_backend,
             stop_real_backend,
+            native_mic::get_native_microphone_status,
+            native_mic::start_native_microphone_recording,
+            native_mic::stop_native_microphone_recording,
+            native_mic::upload_native_microphone_recording,
         ])
         .build(tauri::generate_context!())
         .expect("error while running LUNARIS Tauri shell")

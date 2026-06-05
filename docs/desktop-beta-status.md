@@ -15,15 +15,16 @@
 ```text
 打开 Tauri App
 -> 自动拉起真实 FastAPI sidecar (:18080)
+-> 桌面麦克风录音生成 WAV（第一版已接入，待手动权限实测）
 -> 上传音频
 -> 直传到 Win 3070 FunASR HTTP 服务
 -> 生成 transcript_segments
 -> 调用 DashScope qwen-plus 生成 AI 总结
 ```
 
-这已经满足“上传音频复盘”的内部 Beta 标准。
+这已经满足“上传音频复盘”的内部 Beta 标准；桌面麦克风录音已进入第一版验证阶段。
 
-尚**不是**可分发 Beta / 正式版：缺少桌面原生录音、系统声音/游戏语音采集、配置页写入、代码签名/公证。
+尚**不是**可分发 Beta / 正式版：缺少系统声音/游戏语音采集、配置页写入、代码签名/公证。
 
 ## 2. 已通过项
 
@@ -39,6 +40,7 @@
 | Win 3070 FunASR 转写 | ✅ | `POST /v1/audio/transcriptions` |
 | FunASR 转写落库 | ✅ | `source=funasr_http` |
 | DashScope AI 总结 | ✅ | `provider=dashscope`, `model=qwen-plus` |
+| Tauri/Rust 原生麦克风录音第一版 | ✅ | 代码接入；`cargo check` / 前端 lint/build 通过 |
 | 后端 pytest | ✅ | `49 passed` |
 | 前端 lint | ✅ | 通过 |
 | Tauri cargo test | ✅ | `2 passed` |
@@ -47,7 +49,8 @@
 
 | 项 | 状态 | 说明 |
 |---|---|---|
-| 桌面内置网页录音 | ⚠️ 受限 | macOS WKWebView 中 `MediaRecorder/getUserMedia` 不可靠；下一阶段改做 Tauri/Rust 原生麦克风录音。 |
+| 桌面内置网页录音 | ⚠️ 受限 | macOS WKWebView 中 `MediaRecorder/getUserMedia` 不可靠；桌面 App 改走 Tauri/Rust 原生麦克风入口。 |
+| 原生麦克风手动权限验证 | ⏳ 待实测 | 已接入开始/停止/上传链路，仍需在真实 Tauri 窗口确认 macOS 麦克风授权、录音文件和上传结果。 |
 | 系统声音 / 游戏声音 / 队友语音 | ❌ 未实现 | 当前不能直接采集系统输出，也不能麦克风 + 系统声混录。 |
 | FunASR 句级时间戳 | ⚠️ 受限 | 当前 Win 服务只返回整段 `text`，LUNARIS 会落成单段 `[0, duration]`。 |
 | WebM 输入 | ⚠️ 受限 | 当前 Win FunASR 服务对本地 WebM 样例返回 500；优先使用 MP3/WAV/M4A。 |
@@ -56,11 +59,10 @@
 
 ## 4. 下一阶段建议
 
-1. **先收口当前变更**：文档、测试、sidecar 二进制同步、git 提交。
-2. **做桌面原生麦克风录音**：绕开 WKWebView `MediaRecorder`，先支持录自己的麦克风。
-3. **做游戏自测 Alpha**：用原生麦克风录音 + FunASR + DashScope 跑 10-30 分钟真实游戏场景。
-4. **再做系统声音/混录**：这是队伍语音复盘的关键，但复杂度高于麦克风，应放在麦克风稳定后。
-5. **最后做可分发 Beta**：设置页配置、keychain/配置安全、签名/公证、安装文档。
+1. **手测桌面麦克风第一版**：确认 macOS 权限、录音 WAV、上传、FunASR 转写、DashScope 总结。
+2. **做游戏自测 Alpha**：用原生麦克风录音 + FunASR + DashScope 跑 10-30 分钟真实游戏场景。
+3. **再做系统声音/混录**：这是队伍语音复盘的关键，但复杂度高于麦克风，应放在麦克风稳定后。
+4. **最后做可分发 Beta**：设置页配置、keychain/配置安全、签名/公证、安装文档。
 
 ## 5. 当前推荐验收命令
 
@@ -82,6 +84,8 @@ FunASR 状态：
 curl http://127.0.0.1:18080/api/asr/status
 curl http://192.168.1.5:10095/health
 ```
+
+如果 `reachable=false`、`timed out` 或 Win health 返回异常，先确认 Windows FunASR 服务仍在运行并且 Mac 与 Windows 仍在同一局域网。
 
 桌面启动：
 

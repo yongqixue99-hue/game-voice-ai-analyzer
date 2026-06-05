@@ -7,8 +7,8 @@
 
 - 项目名称：LUNARIS（游戏语音录音 / 转写 / AI 总结桌面应用）
 - 项目路径：`/Users/xueyongqi/project/project-2`
-- 当前阶段：桌面内部 Beta 候选，已进入「游戏自测前准备」阶段。
-- 当前主要目标：稳定桌面端自动 sidecar + Win FunASR + DashScope 总结链路，然后实现桌面原生麦克风录音。
+- 当前阶段：桌面内部 Beta 候选，正在验证第一版原生麦克风录音。
+- 当前主要目标：确认桌面麦克风录音 -> WAV 上传 -> Win FunASR -> DashScope 总结链路，然后进入游戏自测 Alpha。
 - 当前推荐开发方式：Codex / Claude Code 在真实终端中工作；不要依赖沙箱环境验证端口监听。
 
 ## 2. 产品目标
@@ -24,6 +24,7 @@ LUNARIS 旨在成为一个面向游戏 / 多人语音场景的桌面级语音分
 - 桌面端壳（Tauri 优先，Electron 仅作兜底）。
 
 当前最重要的产品缺口是：桌面端原生音频采集。上传音频已可用；Tauri WebView 内置网页录音在 macOS 上不可依赖。
+第一版 Tauri/Rust 原生麦克风录音已经接入，仍需真实窗口手测 macOS 麦克风授权与录音上传。
 
 ## 3. 当前技术栈
 
@@ -66,6 +67,12 @@ LUNARIS 旨在成为一个面向游戏 / 多人语音场景的桌面级语音分
 - 前端在 Tauri 模式下会把 API base 指向真实 sidecar：`http://127.0.0.1:18080`。
 - 关闭 Tauri 时会尝试清理由 Tauri 启动的 sidecar。
 - 桌面数据目录支持 `config/.env`，frozen sidecar 不依赖仓库根 `.env`。
+- 第一版原生麦克风录音已接入：
+  - Tauri/Rust 使用 `cpal` 采集麦克风。
+  - `hound` 写 WAV 到桌面数据目录临时位置。
+  - Tauri command 上传 WAV 到现有 `/api/recordings/upload`。
+  - 前端新增 Tauri-only “桌面麦克风”卡片，上传成功后刷新历史并可触发自动分析。
+  - 不包含系统声音、游戏声音、队友语音或混录。
 
 ### FunASR / LLM 实测
 
@@ -87,6 +94,7 @@ LUNARIS 旨在成为一个面向游戏 / 多人语音场景的桌面级语音分
   - `openspec/roadmap.md`
 - 当前最相关的 changes：
   - `openspec/changes/funasr-provider-stabilization-and-beta-handoff/`
+  - `openspec/changes/desktop-native-microphone-recording/`
   - `openspec/changes/multi-asr-provider-sprint/`
   - `openspec/changes/desktop-beta-stabilization-sprint/`
   - `openspec/changes/desktop-real-backend-sidecar-sprint/`
@@ -115,13 +123,13 @@ LUNARIS 旨在成为一个面向游戏 / 多人语音场景的桌面级语音分
   - `673dc3c` 新增 Tauri 生产后端启动方案设计。
   - `5d8e023` 新增 Tauri 后端控制面骨架。
   - `8f0bf32` 完善 FunASR HTTP Provider 工程闭环。
+  - `0f75d09` 收口 FunASR 桌面闭环与路线图。
 - 当前未提交工作：
-  - 真实 Win FunASR 接口适配：`file` 字段、`model=sensevoice`、`FUNASR_HTTP_HEALTH_PATH`。
-  - `ASR_PROVIDER=funasr` 别名兼容。
-  - 上传时长探测（WAV 标准库，macOS `afinfo` 兜底）。
-  - Tauri 启动自动拉起真实 sidecar。
-  - 前端启动时自动切到 sidecar API base 并等待健康检查。
-  - 文档更新。
+  - OpenSpec change：`desktop-native-microphone-recording`。
+  - Tauri/Rust 原生麦克风录音第一版。
+  - 前端 Tauri-only “桌面麦克风”卡片。
+  - macOS `NSMicrophoneUsageDescription`。
+  - 桌面 Beta 文档更新。
 - 注意：仓库根 `.env` 和桌面数据目录 `config/.env` 已本地配置为 Win FunASR + DashScope，不应提交。
 
 ## 7. 当前验证结果
@@ -134,14 +142,16 @@ LUNARIS 旨在成为一个面向游戏 / 多人语音场景的桌面级语音分
   - `base_url=http://192.168.1.5:10095`。
   - `transcribe_path=/v1/audio/transcriptions`。
   - `model=sensevoice`。
-  - `reachable=true`。
-- `GET http://192.168.1.5:10095/health` → `device=cuda`，`models_loaded=["sensevoice"]`。
-- 真实 MP3 后端上传 + FunASR 转写成功。
+- 当前复测 `reachable=false` / `timed out`；先前 Win 3070 服务曾返回 `device=cuda`，`models_loaded=["sensevoice"]` 并完成真实转写。继续真实 ASR 前需要确认 Windows FunASR 服务仍在运行且局域网可达。
+- 真实 MP3 后端上传 + FunASR 转写曾成功。
 - 桌面窗口内 AI 总结显示 `dashscope` / `qwen-plus`。
 - 后端测试：`49 passed`。
 - 前端 lint：通过。
+- 前端 build：通过。
+- Tauri `cargo check`：通过（含原生麦克风依赖）。
 - Tauri `cargo test -- --test-threads=1`：`2 passed`。
 - Tauri dev 当前可启动，并自动启动真实 sidecar。
+- 原生麦克风真实录音：待在 Tauri 窗口手动验证权限、停止、上传和历史记录。
 
 ## 8. 常用启动命令
 
@@ -194,7 +204,8 @@ cp dist/lunaris-real-backend-aarch64-apple-darwin ../frontend/src-tauri/binaries
 
 ## 9. 已知限制
 
-- Tauri WebView 内置 `MediaRecorder/getUserMedia` 在 macOS WKWebView 中不可依赖；桌面端录音应改为 Tauri/Rust 原生采集。
+- Tauri WebView 内置 `MediaRecorder/getUserMedia` 在 macOS WKWebView 中不可依赖；桌面 App 已新增 Tauri/Rust 原生麦克风入口。
+- 原生麦克风第一版还需真实窗口手测 macOS 权限与录音上传。
 - 当前还不能直接采集系统声音、游戏声音、Discord/游戏内队友语音。
 - 当前还没有麦克风 + 系统声音混录。
 - Win FunASR 当前返回整段 `text`，没有句级时间戳；时间轴粒度较粗。
@@ -218,25 +229,24 @@ cp dist/lunaris-real-backend-aarch64-apple-darwin ../frontend/src-tauri/binaries
 
 ## 11. 下一阶段建议任务
 
-### 阶段 0：收口当前 FunASR + sidecar 自动启动变更
+### 阶段 0：收口当前 FunASR + sidecar 自动启动变更（已完成）
 
 目标：把当前可用链路固化为干净提交。
 
 - 更新文档和路线图。
 - 跑完整验证：后端 pytest、前端 lint/build、Tauri cargo test、ASR provider smoke、桌面 sidecar 启动检查。
 - 确认 `.env`、数据目录配置、数据库、音频、PyInstaller 产物不入库。
-- 提交当前变更。
+- 已提交：`0f75d09 收口 FunASR 桌面闭环与路线图`。
 
-### 阶段 1：桌面原生麦克风录音
+### 阶段 1：桌面原生麦克风录音（第一版已接入，待手测）
 
 目标：让用户可以在 LUNARIS 桌面应用内录制自己的麦克风，不依赖 WebView `MediaRecorder`。
 
-- 新建 OpenSpec change：建议命名 `desktop-native-microphone-recording`。
-- 调研并选择 Tauri/Rust 音频采集方案。
-- macOS 处理麦克风权限说明。
-- 录制 WAV/M4A 文件到桌面数据目录。
-- 录音完成后复用现有上传/recording/转写/总结链路。
-- 验收：录 30 秒语音 -> 自动或手动 FunASR 转写 -> DashScope 总结。
+- OpenSpec change 已创建：`desktop-native-microphone-recording`。
+- Rust 方案：`cpal` 采集，`hound` 写 WAV，Tauri command 上传。
+- macOS 麦克风权限说明已加入 `frontend/src-tauri/Info.plist`。
+- 前端新增 Tauri-only “桌面麦克风”卡片。
+- 待手动验收：录 30 秒语音 -> 自动或手动 FunASR 转写 -> DashScope 总结。
 
 ### 阶段 2：游戏自测 Alpha
 

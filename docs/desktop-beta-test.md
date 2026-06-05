@@ -41,6 +41,7 @@
 4. **frozen 凭证加载 bug**（B11/总结根因）：PyInstaller 二进制 `__file__` 在临时解包目录，`config.py` 原先只从仓库根读 `.env` → 桌面端 `DASHSCOPE_API_KEY` 永远加载不到，真实 ASR/LLM 报「未配置 key」。已改为 `LUNARIS_DATA_DIR` 模式下额外读 `数据目录/config/.env`（与 `数据目录/.env`），仓库根 `.env` 优先级更高、dev 不受影响。配置位置见 `backend/desktop-data-config.env.example`。
 5. **FunASR 桌面真实 ASR 闭环**：桌面数据目录配置 `ASR_PROVIDER=funasr` 后，真实 sidecar 可把本地音频 multipart 直传 Win 3070 FunASR，不再依赖阿里云公网回源 URL。
 6. **真实 sidecar 自动启动**：Tauri 启动时会自动拉起 `lunaris-real-backend`，前端自动切到 `http://127.0.0.1:18080`，不再需要手动点击“启动真实后端”。
+7. **桌面原生麦克风第一版**：Tauri/Rust 侧新增原生麦克风录音，输出 WAV 后通过 Tauri multipart 上传到现有 `/api/recordings/upload`。
 
 ---
 
@@ -72,6 +73,7 @@ cd frontend && npm run tauri dev
 | B14 | 整场总结/导出 | 总结/导出 | 可用 | ✅ |
 | B15 | 停止后端 | 「停止真实后端」 | 状态 stopped，`:18080` 端口释放 | ✅ |
 | B16 | 关闭无残留 | 关闭 Tauri 窗口 | `lsof -i:18080` 无残留进程 | ✅ 自动复测：停止后端口释放、无 lunaris-real-backend 残留 |
+| B17 | 桌面麦克风录音 | 点“桌面麦克风”开始/停止 | 生成 WAV、上传入历史，可继续转写/总结 | ⏳ 待手动权限实测 |
 
 验证端口/残留（终端）：
 ```bash
@@ -87,7 +89,8 @@ pgrep -fl lunaris-real-backend
 - **FunASR 时间戳粒度**：当前 Win FunASR 服务只返回整段 `text`，没有句级时间戳；LUNARIS 会生成 1 个覆盖整段音频的 segment。
 - **WebM 输入**：当前 Win FunASR 服务对本地 WebM 样例曾返回 500；内部测试优先使用 MP3/WAV/M4A。
 - **桌面端凭证位置**：frozen sidecar 不读仓库 `.env`，需把密钥放在数据目录 `config/.env`（macOS：`~/Library/Application Support/com.lunaris.voice-analyzer/data/config/.env`）。模板见 `backend/desktop-data-config.env.example`。缺失时启动日志会提示 `credentials .env: ... missing`。
-- **MediaRecorder/getUserMedia**：在 Tauri WebView（macOS WKWebView）的可用性以 B9 实测为准；若受限，记录为 known issue，后续评估原生录音桥接。
+- **MediaRecorder/getUserMedia**：在 Tauri WebView（macOS WKWebView）的可用性以 B9 实测为准；桌面 App 已新增原生麦克风入口，B17 负责验证。
+- **系统声音/队友语音**：B17 只验证自己的麦克风，不代表已经支持系统声音、游戏声音或混录。
 - **真实 sidecar 冷启动**：onefile 需解包 + 导入 sqlalchemy/pydantic，首次健康检查可能需等待 1–3s（前端按钮已含轮询）。
 - **代码签名/公证**：`LUNARIS.app` 未签名/未公证，首次打开需右键“打开”绕过 Gatekeeper。本次不做签名。
 - **PyInstaller 非声明依赖**：`pyinstaller` 手动装入 `backend/.venv`，未写入 `pyproject.toml`。`build-desktop-backend.sh` 会自检并提示安装命令。

@@ -9,6 +9,7 @@
 ```text
 Tauri 桌面 App
 -> 自动拉起真实 FastAPI sidecar (:18080)
+-> 桌面麦克风录音生成 WAV（第一版已接入，待手测）
 -> 上传音频
 -> 局域网 Win 3070 FunASR HTTP 转写
 -> DashScope qwen-plus AI 总结
@@ -68,17 +69,19 @@ DASHSCOPE_LLM_MODEL=qwen-plus
 
 ## 阶段 1：桌面原生麦克风录音
 
-建议新建 change：`desktop-native-microphone-recording`
+change：`desktop-native-microphone-recording`
+
+状态：第一版已接入，待真实 Tauri 窗口手动验证麦克风权限、录音上传和分析。
 
 目标：让用户可以在 LUNARIS 桌面 App 内录制自己的麦克风，绕开 macOS WKWebView `MediaRecorder` 限制。
 
 范围：
 
-- 调研并选择 Tauri/Rust 音频采集方案。
-- 处理 macOS 麦克风权限说明。
+- Tauri/Rust 方案：`cpal` 采集麦克风，`hound` 写 WAV。
+- 处理 macOS 麦克风权限说明（`NSMicrophoneUsageDescription`）。
 - 支持开始 / 停止录音。
-- 录制音频保存到桌面数据目录。
-- 录完后创建 recording，复用现有播放 / 转写 / 总结链路。
+- 录制音频保存到桌面数据目录临时位置。
+- 录完后通过 Tauri multipart 上传到现有 `/api/recordings/upload`，复用播放 / 转写 / 总结链路。
 - 第一版只录麦克风，不做系统声音。
 
 不做：
@@ -207,11 +210,11 @@ DASHSCOPE_LLM_MODEL=qwen-plus
 ### 可以打游戏自测
 
 - 桌面 App 内能原生录麦克风。
-- 录音文件稳定落盘。
+- 录音文件稳定落盘并上传。
 - 录完能转写和总结。
 - 长录音 10-30 分钟可用。
 
-这是下一阶段目标。
+当前正在完成这一档的第一步：单段原生麦克风录音。
 
 ### 可以给别人用的 Beta
 

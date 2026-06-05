@@ -146,6 +146,15 @@ type BrowserRecordingStatus =
   | "uploaded"
   | "failed";
 
+type NativeMicRecordingStatus =
+  | "idle"
+  | "requesting"
+  | "recording"
+  | "stopping"
+  | "uploading"
+  | "uploaded"
+  | "failed";
+
 type AutoAnalysisStatus =
   | "idle"
   | "uploading"
@@ -260,6 +269,15 @@ const browserRecordingStatusText: Record<BrowserRecordingStatus, string> = {
   requesting: "请求权限中",
   recording: "录音中",
   paused: "已暂停",
+  stopping: "停止中",
+  uploading: "上传中",
+  uploaded: "上传完成",
+  failed: "失败",
+};
+const nativeMicRecordingStatusText: Record<NativeMicRecordingStatus, string> = {
+  idle: "未开始",
+  requesting: "请求麦克风中",
+  recording: "录音中",
   stopping: "停止中",
   uploading: "上传中",
   uploaded: "上传完成",
@@ -406,18 +424,58 @@ type TauriBackendActionResult = {
   message: string;
 };
 
+type NativeMicStatus = {
+  state: string;
+  is_recording: boolean;
+  elapsed_seconds: number;
+  sample_rate: number | null;
+  channels: number | null;
+};
+
+type NativeMicActionResult = {
+  ok: boolean;
+  message: string;
+  status: NativeMicStatus;
+};
+
+type NativeMicStoppedRecording = {
+  path: string;
+  filename: string;
+  mime_type: string;
+  duration_seconds: number;
+  size_bytes: number;
+  sample_rate: number;
+  channels: number;
+};
+
+type NativeMicStopResult = {
+  ok: boolean;
+  message: string;
+  recording: NativeMicStoppedRecording | null;
+  status: NativeMicStatus;
+};
+
+type NativeMicUploadResult = {
+  ok: boolean;
+  message: string;
+  recording: Recording | null;
+};
+
 const apiBaseUrlSourceLabel: Record<TauriApiBaseUrlInfo["source"], string> = {
   default: "默认值",
   "env:LUNARIS_API_BASE_URL": "环境变量 LUNARIS_API_BASE_URL",
   "env:LUNARIS_PORT": "环境变量 LUNARIS_PORT",
 };
 
-async function invokeTauri<T>(cmd: string): Promise<T | null> {
+async function invokeTauri<T>(
+  cmd: string,
+  args?: Record<string, unknown>,
+): Promise<T | null> {
   if (typeof window === "undefined") return null;
   const invoke = window.__TAURI_INTERNALS__?.invoke;
   if (typeof invoke !== "function") return null;
   try {
-    return await invoke<T>(cmd);
+    return await invoke<T>(cmd, args);
   } catch {
     return null;
   }
@@ -1407,6 +1465,9 @@ export default function Home() {
   const browserRecordingStartedAtRef = useRef<number | null>(null);
   const browserRecordingElapsedBeforePauseRef = useRef(0);
   const discardBrowserRecordingOnStopRef = useRef(false);
+  const nativeMicRecordingTimerRef = useRef<number | null>(null);
+  const nativeMicRecordingStartedAtRef = useRef<number | null>(null);
+  const nativeMicIsRecordingRef = useRef(false);
   const autoAnalysisRunningRef = useRef<Record<string, boolean>>({});
   const longRecorderRef = useRef<MediaRecorder | null>(null);
   const longRecordingStreamRef = useRef<MediaStream | null>(null);
@@ -1477,6 +1538,13 @@ export default function Home() {
     useState<BrowserRecordingStatus>("idle");
   const [browserRecordingElapsedMs, setBrowserRecordingElapsedMs] = useState(0);
   const [browserRecordingError, setBrowserRecordingError] = useState("");
+  const [nativeMicRecordingStatus, setNativeMicRecordingStatus] =
+    useState<NativeMicRecordingStatus>("idle");
+  const [nativeMicRecordingElapsedMs, setNativeMicRecordingElapsedMs] =
+    useState(0);
+  const [nativeMicRecordingError, setNativeMicRecordingError] = useState("");
+  const [nativeMicStoppedRecording, setNativeMicStoppedRecording] =
+    useState<NativeMicStoppedRecording | null>(null);
   const [editingSegmentId, setEditingSegmentId] = useState<string | null>(null);
   const [segmentDraftsById, setSegmentDraftsById] = useState<
     Record<string, string>
@@ -1832,6 +1900,39 @@ export default function Home() {
     };
   }, [clearBrowserRecordingTimer, releaseBrowserRecordingStream]);
 
+  const clearNativeMicRecordingTimer = useCallback(() => {
+    if (nativeMicRecordingTimerRef.current !== null) {
+      window.clearInterval(nativeMicRecordingTimerRef.current);
+      nativeMicRecordingTimerRef.current = null;
+    }
+  }, []);
+
+  const updateNativeMicRecordingElapsed = useCallback(() => {
+    const startedAt = nativeMicRecordingStartedAtRef.current;
+    setNativeMicRecordingElapsedMs(startedAt === null ? 0 : Date.now() - startedAt);
+  }, []);
+
+  const startNativeMicRecordingTimer = useCallback(() => {
+    clearNativeMicRecordingTimer();
+    updateNativeMicRecordingElapsed();
+    nativeMicRecordingTimerRef.current = window.setInterval(() => {
+      updateNativeMicRecordingElapsed();
+    }, 500);
+  }, [clearNativeMicRecordingTimer, updateNativeMicRecordingElapsed]);
+
+  useEffect(() => {
+    nativeMicIsRecordingRef.current = nativeMicRecordingStatus === "recording";
+  }, [nativeMicRecordingStatus]);
+
+  useEffect(() => {
+    return () => {
+      clearNativeMicRecordingTimer();
+      if (nativeMicIsRecordingRef.current) {
+        void invokeTauri<NativeMicStopResult>("stop_native_microphone_recording");
+      }
+    };
+  }, [clearNativeMicRecordingTimer]);
+
   const clearLongRecordingTimer = useCallback(() => {
     if (longRecordingTimerRef.current !== null) {
       window.clearInterval(longRecordingTimerRef.current);
@@ -1874,6 +1975,9 @@ export default function Home() {
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       if (
+        nativeMicRecordingStatus === "recording" ||
+        nativeMicRecordingStatus === "stopping" ||
+        nativeMicRecordingStatus === "uploading" ||
         longRecordingStatus === "recording" ||
         longRecordingStatus === "stopping"
       ) {
@@ -1886,7 +1990,7 @@ export default function Home() {
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
     };
-  }, [longRecordingStatus]);
+  }, [longRecordingStatus, nativeMicRecordingStatus]);
 
   function speakerLabelKey(recordingId: string, sourceLabel: string) {
     return `${recordingId}::${sourceLabel}`;
@@ -2858,6 +2962,108 @@ export default function Home() {
     }
   }
 
+  async function handleStartNativeMicRecording() {
+    setMessage("");
+    setNativeMicRecordingError("");
+    setNativeMicStoppedRecording(null);
+
+    if (runtimeEnvironment !== "Tauri") {
+      setNativeMicRecordingStatus("failed");
+      setNativeMicRecordingError("桌面麦克风录音仅在 LUNARIS App 内可用。");
+      return;
+    }
+
+    if (
+      nativeMicRecordingStatus === "requesting" ||
+      nativeMicRecordingStatus === "recording" ||
+      nativeMicRecordingStatus === "stopping" ||
+      nativeMicRecordingStatus === "uploading"
+    ) {
+      return;
+    }
+
+    setNativeMicRecordingStatus("requesting");
+    setNativeMicRecordingElapsedMs(0);
+    nativeMicRecordingStartedAtRef.current = null;
+
+    const result = await invokeTauri<NativeMicActionResult>(
+      "start_native_microphone_recording",
+    );
+    if (!result) {
+      setNativeMicRecordingStatus("failed");
+      setNativeMicRecordingError("无法调用桌面麦克风录音命令。");
+      return;
+    }
+    if (!result.ok) {
+      setNativeMicRecordingStatus("failed");
+      setNativeMicRecordingError(result.message);
+      return;
+    }
+
+    nativeMicRecordingStartedAtRef.current = Date.now();
+    setNativeMicRecordingStatus("recording");
+    startNativeMicRecordingTimer();
+  }
+
+  async function handleStopNativeMicRecording() {
+    if (nativeMicRecordingStatus !== "recording") {
+      return;
+    }
+
+    setMessage("");
+    setNativeMicRecordingError("");
+    setNativeMicRecordingStatus("stopping");
+    clearNativeMicRecordingTimer();
+    updateNativeMicRecordingElapsed();
+    nativeMicRecordingStartedAtRef.current = null;
+
+    const stopResult = await invokeTauri<NativeMicStopResult>(
+      "stop_native_microphone_recording",
+    );
+    if (!stopResult) {
+      setNativeMicRecordingStatus("failed");
+      setNativeMicRecordingError("无法停止桌面麦克风录音。");
+      return;
+    }
+    if (!stopResult.ok || !stopResult.recording) {
+      setNativeMicRecordingStatus("failed");
+      setNativeMicRecordingError(stopResult.message);
+      return;
+    }
+
+    setNativeMicStoppedRecording(stopResult.recording);
+    setNativeMicRecordingStatus("uploading");
+    const uploadResult = await invokeTauri<NativeMicUploadResult>(
+      "upload_native_microphone_recording",
+      {
+        api_base_url: getApiBaseUrl(),
+        recording_path: stopResult.recording.path,
+      },
+    );
+
+    if (!uploadResult) {
+      setNativeMicRecordingStatus("failed");
+      setNativeMicRecordingError("无法调用桌面麦克风上传命令。");
+      return;
+    }
+    if (!uploadResult.ok || !uploadResult.recording) {
+      setNativeMicRecordingStatus("failed");
+      setNativeMicRecordingError(uploadResult.message);
+      return;
+    }
+
+    setNativeMicRecordingStatus("uploaded");
+    setMessage(
+      isAutoAnalysisEnabled
+        ? "桌面麦克风录音已上传，自动分析即将开始。"
+        : "桌面麦克风录音已上传。",
+    );
+    await loadRecordings();
+    if (isAutoAnalysisEnabled) {
+      void runAutoAnalysis(uploadResult.recording.id);
+    }
+  }
+
   async function handleStartBrowserRecording() {
     setMessage("");
     setBrowserRecordingError("");
@@ -3703,7 +3909,7 @@ export default function Home() {
           <span>
             <span className="block font-medium">上传/录音完成后自动分析</span>
             <span className="mt-1 block text-gray-600">
-              开启后会自动执行阿里云真实转写，再生成 AI 总结；关闭时保留手动流程。
+              开启后会自动执行当前 ASR 真实转写，再生成 AI 总结；关闭时保留手动流程。
             </span>
           </span>
         </label>
@@ -3717,6 +3923,89 @@ export default function Home() {
         {message ? <p className="text-sm text-green-700">{message}</p> : null}
         {formError ? <p className="text-sm text-red-700">{formError}</p> : null}
       </form>
+
+      {runtimeEnvironment === "Tauri" ? (
+      <section className="flex flex-col gap-4 rounded border border-gray-200 p-4">
+        <div>
+          <h2 className="text-xl font-semibold">桌面麦克风</h2>
+          <p className="mt-1 text-sm text-gray-600">
+            Tauri 原生录音，仅采集麦克风；不包含系统声音、游戏声音或队友语音。
+          </p>
+          <p className="mt-1 text-sm text-gray-600">
+            当前自动分析：{isAutoAnalysisEnabled ? "已开启" : "已关闭"}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-4 text-sm">
+          <p>
+            状态：
+            <span className="font-medium">
+              {nativeMicRecordingStatusText[nativeMicRecordingStatus]}
+            </span>
+          </p>
+          <p>
+            时长：
+            <span className="font-medium">
+              {formatRecordingDuration(nativeMicRecordingElapsedMs)}
+            </span>
+          </p>
+          {nativeMicStoppedRecording ? (
+            <p>
+              文件：
+              <span className="font-medium">
+                {formatBytes(nativeMicStoppedRecording.size_bytes)}
+              </span>
+            </p>
+          ) : null}
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="rounded bg-black px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-gray-400"
+            disabled={
+              nativeMicRecordingStatus === "requesting" ||
+              nativeMicRecordingStatus === "recording" ||
+              nativeMicRecordingStatus === "stopping" ||
+              nativeMicRecordingStatus === "uploading"
+            }
+            type="button"
+            onClick={() => {
+              void handleStartNativeMicRecording();
+            }}
+          >
+            开始麦克风
+          </button>
+          <button
+            className="rounded border border-gray-300 px-4 py-2 text-sm disabled:cursor-not-allowed disabled:bg-gray-100"
+            disabled={nativeMicRecordingStatus !== "recording"}
+            type="button"
+            onClick={() => {
+              void handleStopNativeMicRecording();
+            }}
+          >
+            停止并上传
+          </button>
+        </div>
+
+        {nativeMicRecordingStatus === "requesting" ? (
+          <p className="rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700">
+            正在请求系统麦克风权限...
+          </p>
+        ) : null}
+
+        {nativeMicRecordingStatus === "uploading" ? (
+          <p className="rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700">
+            录音已停止，正在上传...
+          </p>
+        ) : null}
+
+        {nativeMicRecordingError ? (
+          <p className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {nativeMicRecordingError}
+          </p>
+        ) : null}
+      </section>
+      ) : null}
 
       <section className="flex flex-col gap-4 rounded border border-gray-200 p-4">
         <div>
