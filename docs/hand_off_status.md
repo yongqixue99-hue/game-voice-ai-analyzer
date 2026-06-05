@@ -7,154 +7,172 @@
 
 - 项目名称：LUNARIS（游戏语音录音 / 转写 / AI 总结桌面应用）
 - 项目路径：`/Users/xueyongqi/project/project-2`
-- 当前阶段：P1.5「前端最小接线 Tauri 控制面」已落地；进入「P2 PyInstaller + Tauri sidecar hello-world 验证」阶段
-- 当前主要目标：在不动业务逻辑的前提下，优化开发期一键启动体验，并规划生产打包方案
-- 当前推荐开发方式：Claude Code 命令行（真实终端），不要在 Claude 桌面端沙箱里跑 dev server
+- 当前阶段：桌面内部 Beta 候选，已进入「游戏自测前准备」阶段。
+- 当前主要目标：稳定桌面端自动 sidecar + Win FunASR + DashScope 总结链路，然后实现桌面原生麦克风录音。
+- 当前推荐开发方式：Codex / Claude Code 在真实终端中工作；不要依赖沙箱环境验证端口监听。
 
 ## 2. 产品目标
 
 LUNARIS 旨在成为一个面向游戏 / 多人语音场景的桌面级语音分析工具，覆盖：
 
-- 游戏语音录音 / 上传（浏览器 MediaRecorder + 文件上传）
-- ASR 转写（支持多 provider，含阿里云）
-- 说话人分离 / 玩家识别（规划中，后续阶段实现）
-- AI 总结（单段总结 + 整场总结）
-- 时间轴点击跳转（可点击转写片段定位音频位置）
-- 历史记录与导出
-- 桌面端壳（Tauri 优先，Electron 仅作兜底）
+- 游戏语音录音 / 上传。
+- ASR 转写（支持 mock / aliyun / funasr_http）。
+- 说话人标签修正 / 玩家识别（当前支持手动重命名，自动识别规划中）。
+- AI 总结（单段总结 + 整场总结）。
+- 时间轴点击跳转（可点击转写片段定位音频位置）。
+- 历史记录与导出。
+- 桌面端壳（Tauri 优先，Electron 仅作兜底）。
+
+当前最重要的产品缺口是：桌面端原生音频采集。上传音频已可用；Tauri WebView 内置网页录音在 macOS 上不可依赖。
 
 ## 3. 当前技术栈
 
-- 前端：Next.js 16.2.6 + React 19 + TypeScript 5 + Tailwind 4
-  - UI 结构：侧边栏导航 + 多路由页面（录音 / 历史 / 详情 / 设置等）
-  - 运行环境检测：Browser / Tauri 双模式
-- 后端：FastAPI（Python 3.11，`backend/.venv/`）+ SQLite
-  - 健康检查：`GET /api/health`（保留 `/health` 兼容）
-- 桌面端：Tauri v2（`@tauri-apps/cli` 2.11.2）+ Rust 1.95
-  - 启动入口：`npm run tauri dev`（在 `frontend/` 目录）
-  - 加载 devUrl：`http://localhost:3000`
-  - 二进制名：`lunaris-desktop`
+- 前端：Next.js 16.2.6 + React 19 + TypeScript 5 + Tailwind 4。
+  - UI 结构：侧边栏导航 + 控制台 / 历史记录 / 会话 / 设置。
+  - 运行环境检测：Browser / Tauri 双模式。
+- 后端：FastAPI（Python 3.11，`backend/.venv/`）+ SQLite。
+  - 健康检查：`GET /api/health`（保留 `/health` 兼容）。
+  - 桌面 sidecar 默认端口：`127.0.0.1:18080`。
+  - Web dev 后端默认端口：`127.0.0.1:8000`。
+- 桌面端：Tauri v2（`@tauri-apps/cli` 2.11.2）+ Rust 1.95。
+  - 启动入口：`cd frontend && npm run tauri dev`。
+  - Tauri dev 会启动 Next dev，并自动拉起真实 FastAPI sidecar。
+  - 二进制名：`lunaris-desktop`。
 - 数据存储：
-  - SQLite 数据库：`backend/` 内（不入库，已 gitignore）
-  - 音频文件：`backend/storage/audio/`（已 gitignore，仅保留 `.gitkeep`）
-- 桌面方案：当前是 Tauri，**不是 Electron**；Electron 仅是兜底，不要重做
+  - Web dev SQLite：`backend/recordings.sqlite3`。
+  - 桌面数据目录：`~/Library/Application Support/com.lunaris.voice-analyzer/data/`。
+  - 桌面配置：`~/Library/Application Support/com.lunaris.voice-analyzer/data/config/.env`。
+- 桌面方案：当前是 Tauri，**不是 Electron**；Electron 仅是兜底，不要重做。
 
 ## 4. 已完成工作
 
-### Web MVP 已完成
+### Web / 后端主链路
 
-- 浏览器录音（MediaRecorder）
-- 音频上传
-- 音频转写（ASR）
-- ASR provider 抽象，含阿里云 provider（具体 mock / 真实状态以代码与 OpenSpec `real-asr-aliyun` 为准）
-- AI 总结（单段）
-- 长录音自动分段（`recording-session-auto-chunking`）
-- 整场总结
-- 可点击时间轴转写（`transcription-timeline-clickable-transcript`）
-- 历史记录与导出
-- SQLite 存储
+- 音频上传与播放。
+- ASR provider 抽象：`mock` / `aliyun` / `funasr_http`。
+- 阿里云 ASR provider 保留，用于有公网音频 URL 的场景。
+- FunASR HTTP provider 已接入真实 Win 3070 服务。
+- 转写时间轴展示与点击跳转。
+- 转写文本编辑与说话人重命名。
+- AI 总结（mock / DashScope / OpenAI provider 结构）。
+- 当前桌面配置下 AI 总结使用 `dashscope` / `qwen-plus`。
+- 长录音 session / chunk 数据模型、分段处理、整场总结和导出能力已具备 Web 侧实现基础。
 
-### Tauri Shell MVP 已完成
+### 桌面 / Sidecar
 
-- Tauri 项目结构：`frontend/src-tauri/`
-- 配置：`frontend/src-tauri/tauri.conf.json`（devUrl=`http://localhost:3000`，frontendDist=`../out`）
-- Cargo：`frontend/src-tauri/Cargo.toml`（tauri = "2"，无额外 features）
-- Rust 入口：`frontend/src-tauri/src/main.rs`
-- 权限：`frontend/src-tauri/capabilities/default.json`
-- 脚本：`frontend/package.json` 中的 `"tauri": "tauri"`
-- 设置页：运行环境（Browser/Tauri）显示
-- 设置页：FastAPI 健康检查状态（已连接 / 未连接 / 检查中）
-- 设置页：API Base URL 显示
-- Tauri 窗口加载 `http://localhost:3000` 通过本机人工验证
-- 占位图标：`frontend/src-tauri/icons/icon.png`（32×32 透明 PNG，仅供 dev 编译，正式版需替换）
+- Tauri 项目结构：`frontend/src-tauri/`。
+- 真实 FastAPI 后端已通过 PyInstaller 打成 `lunaris-real-backend` sidecar。
+- Tauri 启动时会自动拉起真实 sidecar，不再需要用户手动点“启动真实后端”。
+- 前端在 Tauri 模式下会把 API base 指向真实 sidecar：`http://127.0.0.1:18080`。
+- 关闭 Tauri 时会尝试清理由 Tauri 启动的 sidecar。
+- 桌面数据目录支持 `config/.env`，frozen sidecar 不依赖仓库根 `.env`。
+
+### FunASR / LLM 实测
+
+- Win 3070 FunASR Base URL：`http://192.168.1.5:10095`。
+- Health：`GET /health`。
+- Models：`GET /v1/models`。
+- Transcribe：`POST /v1/audio/transcriptions`。
+- multipart 字段：
+  - `file`: 音频文件。
+  - `model`: `sensevoice`。
+- 真实 MP3 上传 + FunASR 转写 + DashScope 总结已在桌面窗口中跑通。
+- 当前 Win FunASR 响应只有整段 `text`，无句级时间戳；LUNARIS 会落成 1 个 `source=funasr_http` 片段，时间范围使用上传时探测到的音频时长。
+- 本地 WebM 样例直连 Win 服务曾返回 500；在 Win 服务确认 WebM 解码前，优先用 MP3/WAV/M4A 测试。
 
 ## 5. OpenSpec / Markdown 文档位置
 
 - OpenSpec 根：`openspec/`
-  - `openspec/project.md`、`openspec/roadmap.md`
-- 已归档 / 已完成的 changes（节选）：
-  - `openspec/changes/tauri-shell-mvp/`
-    - `proposal.md` / `design.md` / `spec.md` / `tasks.md`
-    - `specs/tauri-shell-mvp/spec.md`
-  - `openspec/changes/desktop-app-architecture-research/`
-  - `openspec/changes/real-asr-aliyun/`
-  - `openspec/changes/auto-transcribe-and-summary/`
-  - `openspec/changes/audio-upload-playback/`
-  - `openspec/changes/browser-recording-basic/`
-  - `openspec/changes/transcription-timeline-clickable-transcript/`
+  - `openspec/project.md`
+  - `openspec/roadmap.md`
+- 当前最相关的 changes：
+  - `openspec/changes/funasr-provider-stabilization-and-beta-handoff/`
+  - `openspec/changes/multi-asr-provider-sprint/`
+  - `openspec/changes/desktop-beta-stabilization-sprint/`
+  - `openspec/changes/desktop-real-backend-sidecar-sprint/`
+  - `openspec/changes/real-backend-sidecar-readiness/`
   - `openspec/changes/recording-session-auto-chunking/`
-  - `openspec/changes/mvp-stabilization-and-e2e-check/`
+  - `openspec/changes/auto-transcribe-and-summary/`
+  - `openspec/changes/browser-recording-basic/`
 - 项目文档：
-  - `docs/tauri-shell-mvp.md`（三终端开发启动说明）
+  - `docs/asr-providers.md`
+  - `docs/funasr-http-provider-handoff.md`
+  - `docs/desktop-beta-status.md`
+  - `docs/desktop-beta-known-issues.md`
+  - `docs/desktop-beta-test.md`
   - `docs/manual-e2e-test.md`
+  - `docs/real-backend-sidecar-readiness.md`
   - `docs/hand_off_status.md`（本文件）
-  - `openspec/changes/tauri-prod-backend-launch-design/`（生产版后端启动方案设计，仅文档）
-    - `proposal.md` / `design.md` / `spec.md` / `tasks.md`
-    - `specs/tauri-prod-backend-launch-design/spec.md`
-  - `openspec/changes/tauri-prod-backend-control-plane/`（P1 控制面骨架：Rust 侧 IPC）
-    - `proposal.md` / `design.md` / `spec.md` / `tasks.md`
-    - `specs/tauri-prod-backend-control-plane/spec.md`
-  - `openspec/changes/tauri-prod-backend-control-plane-frontend-wire/`（P1.5 前端接线，最小增量）
-    - `proposal.md` / `design.md` / `spec.md` / `tasks.md`
-    - `specs/tauri-prod-backend-control-plane-frontend-wire/spec.md`
-- 设计稿：`design/LUNARIS-desktop-ui-handoff.md`
-- 代码内说明：`frontend/README.md`、`frontend/AGENTS.md`、`frontend/CLAUDE.md`、`backend/README.md`
 
 ## 6. Git 状态与重要提交
 
 - 当前分支：`main`
-- 重要提交：
-  - `b450123` 完成 Web MVP 与 Tauri shell MVP 初版（Codex / Claude 桌面端阶段）
-  - `d44c4d2` 修复 Tauri 启动链路：补齐 icons/icon.png 占位资源（Claude Code 真实终端首次完整验证）
-  - `143dab5` 新增项目交接文档
-  - `09dc401` 新增开发环境一键启动脚本
-  - `673dc3c` 新增 Tauri 生产后端启动方案设计
-  - `5d8e023` 新增 Tauri 后端控制面骨架
-  - 本次提交：接入 Tauri 后端控制面到设置页（hash 提交后补充）
+- 已提交的重要节点：
+  - `b450123` 完成 Web MVP 与 Tauri shell MVP 初版。
+  - `d44c4d2` 修复 Tauri 启动链路：补齐 icons/icon.png 占位资源。
+  - `143dab5` 新增项目交接文档。
+  - `09dc401` 新增开发环境一键启动脚本。
+  - `673dc3c` 新增 Tauri 生产后端启动方案设计。
+  - `5d8e023` 新增 Tauri 后端控制面骨架。
+  - `8f0bf32` 完善 FunASR HTTP Provider 工程闭环。
+- 当前未提交工作：
+  - 真实 Win FunASR 接口适配：`file` 字段、`model=sensevoice`、`FUNASR_HTTP_HEALTH_PATH`。
+  - `ASR_PROVIDER=funasr` 别名兼容。
+  - 上传时长探测（WAV 标准库，macOS `afinfo` 兜底）。
+  - Tauri 启动自动拉起真实 sidecar。
+  - 前端启动时自动切到 sidecar API base 并等待健康检查。
+  - 文档更新。
+- 注意：仓库根 `.env` 和桌面数据目录 `config/.env` 已本地配置为 Win FunASR + DashScope，不应提交。
 
 ## 7. 当前验证结果
 
-均在真实终端（macOS, darwin 25.5.0）通过：
+最近一次人工/命令验证：
 
-- 后端 uvicorn 在 `:8000` 可运行
-- `GET http://127.0.0.1:8000/api/health` → `{"status":"ok","service":"fastapi","version":"0.1.0"}`
-- 前端 Next dev 在 `:3000` 可运行（200 OK）
-- Tauri dev 可启动（首次冷编译约 11 分钟，340 crates；增量编译数秒）
-- Tauri 窗口可加载 Web UI（非空白页）
-- 侧边栏导航可点击切换
-- 设置页运行环境识别为 `Tauri`
-- 设置页显示 API Base URL
-- FastAPI 状态切换验证：
-  - 后端启动 → 已连接 ✅
-  - kill uvicorn → 未连接 ✅
-  - 重启 uvicorn → 恢复已连接 ✅
-- 前端 lint：0 errors（仅 1 个 `target/debug` 内部生成文件 warning，与项目代码无关）
+- `GET http://127.0.0.1:18080/api/health` → OK。
+- `GET http://127.0.0.1:18080/api/asr/status`：
+  - `provider=funasr_http`。
+  - `base_url=http://192.168.1.5:10095`。
+  - `transcribe_path=/v1/audio/transcriptions`。
+  - `model=sensevoice`。
+  - `reachable=true`。
+- `GET http://192.168.1.5:10095/health` → `device=cuda`，`models_loaded=["sensevoice"]`。
+- 真实 MP3 后端上传 + FunASR 转写成功。
+- 桌面窗口内 AI 总结显示 `dashscope` / `qwen-plus`。
+- 后端测试：`49 passed`。
+- 前端 lint：通过。
+- Tauri `cargo test -- --test-threads=1`：`2 passed`。
+- Tauri dev 当前可启动，并自动启动真实 sidecar。
 
 ## 8. 常用启动命令
 
-### 一键启动（推荐用于本地开发）
+### 桌面 dev（当前推荐）
 
 ```bash
-cd /Users/xueyongqi/project/project-2
-./scripts/dev-all.sh
+cd /Users/xueyongqi/project/project-2/frontend
+npm run tauri dev
 ```
 
-`scripts/dev-all.sh` 会按顺序拉起 backend（uvicorn :8000）、frontend（next dev :3000）、tauri dev，
-日志合并到当前终端并带彩色前缀 `[backend] / [frontend] / [tauri]`。
-在前台运行时按 `Ctrl+C` 会统一清理三个子进程及其后代（包括 cargo / lunaris-desktop），不留残留。
-启动前会自动检查：`backend/.venv`、`frontend/node_modules`、`cargo`、端口 3000/8000 是否被占用，
-有任何前置缺失会提示并退出。
+行为：
 
-该脚本仅用于开发环境，不是生产打包方案；现有手动三终端启动方式继续可用，互不影响。
+- Tauri dev 会启动 Next dev。
+- Tauri 主进程会自动拉起真实 FastAPI sidecar。
+- 前端会切到 `http://127.0.0.1:18080`。
 
-### 手动三终端启动（保留）
+检查：
+
+```bash
+curl http://127.0.0.1:18080/api/health
+curl http://127.0.0.1:18080/api/asr/status
+```
+
+### Web dev（仍可用）
 
 后端：
 
 ```bash
 cd /Users/xueyongqi/project/project-2/backend
 source .venv/bin/activate
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 前端：
@@ -164,98 +182,100 @@ cd /Users/xueyongqi/project/project-2/frontend
 npm run dev
 ```
 
-Tauri：
+### 重新打包真实 sidecar
+
+当修改了 `backend/app/**` 或 `backend/desktop_entry.py` 后，需要重新打包并同步：
 
 ```bash
-cd /Users/xueyongqi/project/project-2/frontend
-npm run tauri dev
-```
-
-检查：
-
-```bash
-cd /Users/xueyongqi/project/project-2/frontend
-npm run lint
-```
-
-Git：
-
-```bash
-cd /Users/xueyongqi/project/project-2
-git status
-git log --oneline -5
+cd /Users/xueyongqi/project/project-2/backend
+./build-desktop-backend.sh
+cp dist/lunaris-real-backend-aarch64-apple-darwin ../frontend/src-tauri/binaries/
 ```
 
 ## 9. 已知限制
 
-- 当前 Tauri dev 依赖手动启动后端和前端（三终端）
-- Tauri 目前只是桌面壳，不负责自动启动 FastAPI
-- 当前没有打包 Python 后端
-- 当前没有生产安装包（`bundle.active = false`）
-- `frontend/src-tauri/icons/icon.png` 是 32×32 透明占位 PNG，正式版需要替换为多尺寸图标（含 `.icns` / `.ico`）
-- 阿里云 ASR 在桌面端仍需要公网音频 URL；本地文件 / localhost URL 不能被云端直接访问
-- 不实现：系统声音录制、混录、托盘、悬浮窗、开机启动、FunASR 本地部署
-- Claude 桌面端沙箱无法监听端口，无法验证 dev server，必须用 Claude Code 命令行
-- macOS 系统：darwin 25.5.0；Node v26；Python 3.11（venv）；Rust 1.95
+- Tauri WebView 内置 `MediaRecorder/getUserMedia` 在 macOS WKWebView 中不可依赖；桌面端录音应改为 Tauri/Rust 原生采集。
+- 当前还不能直接采集系统声音、游戏声音、Discord/游戏内队友语音。
+- 当前还没有麦克风 + 系统声音混录。
+- Win FunASR 当前返回整段 `text`，没有句级时间戳；时间轴粒度较粗。
+- WebM 输入在当前 Win FunASR 服务上可能失败；优先用 MP3/WAV/M4A。
+- 生产发布未完成代码签名 / 公证。
+- 配置仍依赖数据目录 `config/.env`，后续应做设置页写配置和密钥存储。
+- 不要把 `.env`、数据库、音频、PyInstaller build/dist、Tauri target 产物提交进 Git。
 
 ## 10. 禁止事项 / 开发红线
 
-- 不要重新初始化项目
-- 不要重写 Tauri
-- 不要从 Electron 重做
-- 不要大规模重构
-- 不要删除 OpenSpec / Markdown 文档
-- 不要随意改业务逻辑（录音、上传、ASR、总结、时间轴、历史记录、导出等）
-- 不要修改数据库结构，除非任务明确要求
-- 不要把音频文件、`node_modules`、`.next`、`src-tauri/target`、`.venv`、`src-tauri/gen/` 等提交进 Git
-- 每次任务前先 `git status`
-- 每次任务完成后更新本文档 `docs/hand_off_status.md`
+- 不要重新初始化项目。
+- 不要重写 Tauri。
+- 不要从 Electron 重做。
+- 不要大规模重构。
+- 不要删除 OpenSpec / Markdown 文档。
+- 不要随意改上传、ASR、总结、时间轴、历史记录、导出等主链路。
+- 不要提交真实 API Key、`.env`、数据库、音频、build/dist、二进制产物。
+- 修改后端 sidecar 代码后，必须重新打包 `lunaris-real-backend` 并复制到 `frontend/src-tauri/binaries/` 才能在桌面端生效。
+- 每次任务前先 `git status`。
+- 每次阶段任务完成后更新本文档。
 
 ## 11. 下一阶段建议任务
 
-### 下一阶段目标：开发环境一键启动与桌面端启动链路优化
+### 阶段 0：收口当前 FunASR + sidecar 自动启动变更
 
-当前需要同时开三个终端（uvicorn / Next dev / Tauri dev）。下一步**先不要做复杂打包**，也不要急着把 Python 后端塞进 Tauri。先做低风险的开发体验优化。
+目标：把当前可用链路固化为干净提交。
 
-### 下一阶段目标：P2 PyInstaller + Tauri sidecar hello-world 验证
+- 更新文档和路线图。
+- 跑完整验证：后端 pytest、前端 lint/build、Tauri cargo test、ASR provider smoke、桌面 sidecar 启动检查。
+- 确认 `.env`、数据目录配置、数据库、音频、PyInstaller 产物不入库。
+- 提交当前变更。
 
-P1.5 已落地：设置页在 Tauri 模式下消费 3 个只读 IPC（`get_api_base_url` / `get_runtime_info` / `get_backend_status`），新增 3 行展示「API Base URL 来源」「后端管理模式」「Tauri Runtime 信息」；不引入 `@tauri-apps/api` 依赖，不动业务逻辑；Browser 模式走 fallback 文案。`start_backend` / `stop_backend` 仍为占位，UI 未暴露按钮。
+### 阶段 1：桌面原生麦克风录音
 
-启动方式仍是 `./scripts/dev-all.sh`，未变。
+目标：让用户可以在 LUNARIS 桌面应用内录制自己的麦克风，不依赖 WebView `MediaRecorder`。
 
-#### P2（建议下一步）：PyInstaller + sidecar hello-world
+- 新建 OpenSpec change：建议命名 `desktop-native-microphone-recording`。
+- 调研并选择 Tauri/Rust 音频采集方案。
+- macOS 处理麦克风权限说明。
+- 录制 WAV/M4A 文件到桌面数据目录。
+- 录音完成后复用现有上传/recording/转写/总结链路。
+- 验收：录 30 秒语音 -> 自动或手动 FunASR 转写 -> DashScope 总结。
 
-- 单独 change：`tauri-prod-backend-pyinstaller`。
-- 用一个 hello-world FastAPI（仅暴露 `/api/health`）验证 PyInstaller 单文件/单目录可执行 + Tauri externalBin sidecar + Rust 侧真实 spawn / kill。
-- 仍**不**触碰真实 backend、**不**做签名公证、**不**改 `bundle.active`（手动测试用 `tauri build --no-bundle` 或 ad-hoc 跑生成的 binary）。
-- 完成后 `start_backend` / `stop_backend` 才会从占位换成真实实现。
+### 阶段 2：游戏自测 Alpha
 
-#### 优先级 A：~~开发期一键启动脚本~~ ✅ 已完成
-#### 优先级 B：~~Tauri 生产版后端启动方案（仅设计）~~ ✅ 已完成
-#### 优先级 C：~~P1 控制面骨架~~ ✅ 已完成
-#### 优先级 D：~~P1.5 前端接线~~ ✅ 已完成（本次）
+目标：边打游戏边录自己的麦克风，验证长时间稳定性。
 
-- 写设计文档说明：
-  - 如何让 Tauri 自动拉起 FastAPI
-  - PyInstaller / Tauri sidecar / 本地 HTTP 服务的取舍
-  - 打包时如何处理 Python 解释器、依赖、模型、ASR provider 配置、SQLite 路径、音频存储目录
-  - macOS 签名 / 公证可能影响
+- 验证 10-30 分钟录音不丢文件。
+- 验证长录音 chunk 自动转写/总结。
+- 验证失败 chunk 可重试。
+- 验证整场总结和导出。
+- 根据真实使用体验修复文案、状态、错误提示。
 
-#### 优先级 C：正式打包
+### 阶段 3：系统声音 / 队伍语音采集
 
-- 替换正式多尺寸图标（`.icns` / `.ico` / 各 PNG 尺寸）
-- `tauri build` 生产打包
-- macOS `.app` / `.dmg` 安装包本地验证
+目标：支持真正的游戏语音复盘。
+
+- 新建 OpenSpec change：建议命名 `desktop-system-audio-capture`.
+- 分平台调研 macOS / Windows 系统声音采集方案。
+- 先定义最小可接受形态：外部虚拟声卡指南，还是内置采集。
+- 再做麦克风 + 系统声音混录。
+- 验收：能同时捕获自己麦克风和队友/游戏语音。
+
+### 阶段 4：可分发 Beta
+
+目标：让非开发者也能使用。
+
+- 设置页配置 FunASR 地址、模型、LLM provider。
+- 密钥存储从 `.env` 过渡到系统 keychain 或更安全的本地配置。
+- 替换正式图标。
+- `tauri build` 产出 app。
+- macOS 代码签名 / 公证。
+- 用户文档：安装、首次权限、FunASR 地址配置、常见错误排查。
 
 ## 12. 每次任务更新规则
 
-每次 Claude Code（或其他助手）完成任务后，必须更新本文档以下小节：
+每次阶段任务完成后，必须更新本文档以下小节：
 
-- §1 当前阶段
-- §4 已完成工作
-- §6 Git 状态与重要提交（追加新 commit hash 与说明）
-- §7 当前验证结果
-- §9 已知限制（如有新增）
-- §11 下一阶段建议任务
-
-如果任务产生了新命令、新脚本、新配置，必须同步写进 §8 常用启动命令；如果触碰了红线或新增了红线，须更新 §10。
+- §1 当前阶段。
+- §4 已完成工作。
+- §6 Git 状态与重要提交。
+- §7 当前验证结果。
+- §9 已知限制。
+- §11 下一阶段建议任务。

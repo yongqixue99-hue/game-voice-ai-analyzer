@@ -363,6 +363,12 @@ function setRuntimeApiBaseUrl(url: string | null) {
   };
 }
 
+function wait(milliseconds: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, milliseconds);
+  });
+}
+
 function detectRuntimeEnvironment(): RuntimeEnvironment {
   if (
     typeof window !== "undefined" &&
@@ -1635,12 +1641,14 @@ export default function Home() {
       void fetchAsrStatus()
         .then(setAsrStatus)
         .catch(() => setAsrStatus(null));
+      return true;
     } catch (error) {
       setBackendHealth(null);
       setBackendHealthStatus("disconnected");
       setBackendHealthError(
         getApiErrorMessage(error, "后端未连接，请先启动 FastAPI 服务"),
       );
+      return false;
     }
   }, []);
 
@@ -1659,7 +1667,18 @@ export default function Home() {
       // we fall back to the default base (dev backend / NEXT_PUBLIC override).
       setRuntimeApiBaseUrl(status.running ? status.api_base_url : null);
     }
+    return status;
   }, []);
+
+  const waitForBackendHealth = useCallback(async () => {
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      if (await checkBackendHealth()) {
+        return true;
+      }
+      await wait(500);
+    }
+    return false;
+  }, [checkBackendHealth]);
 
   const runBackendAction = useCallback(
     async (cmd: "start_backend" | "stop_backend") => {
@@ -1690,44 +1709,86 @@ export default function Home() {
       // refreshRealBackendStatus repoints the API base at the sidecar (or clears
       // it on stop); re-check health + reload data against the new base.
       await refreshRealBackendStatus();
-      await checkBackendHealth();
+      await waitForBackendHealth();
       await loadRecordings();
       await loadRecordingSessions();
       setTauriRealBackendActionPending(false);
     },
     [
       refreshRealBackendStatus,
-      checkBackendHealth,
       loadRecordings,
       loadRecordingSessions,
+      waitForBackendHealth,
     ],
   );
 
   useEffect(() => {
-    void loadRecordings();
-  }, [loadRecordings]);
-
-  useEffect(() => {
-    void loadRecordingSessions();
-  }, [loadRecordingSessions]);
-
-  useEffect(() => {
     const env = detectRuntimeEnvironment();
     setRuntimeEnvironment(env);
-    void checkBackendHealth();
-    if (env === "Tauri") {
-      void invokeTauri<TauriApiBaseUrlInfo>("get_api_base_url").then((v) => {
-        if (v) setTauriApiBaseUrlInfo(v);
-      });
-      void invokeTauri<TauriRuntimeInfo>("get_runtime_info").then((v) => {
-        if (v) setTauriRuntimeInfo(v);
-      });
-      void invokeTauri<TauriBackendStatus>("get_backend_status").then((v) => {
-        if (v) setTauriBackendStatus(v);
-      });
+    let cancelled = false;
+
+    const loadInitialData = async () => {
+      if (env === "Tauri") {
+        const [apiBaseInfo, runtimeInfo, backendStatus] = await Promise.all([
+          invokeTauri<TauriApiBaseUrlInfo>("get_api_base_url"),
+          invokeTauri<TauriRuntimeInfo>("get_runtime_info"),
+          invokeTauri<TauriBackendStatus>("get_backend_status"),
+        ]);
+
+        if (cancelled) return;
+        if (apiBaseInfo) setTauriApiBaseUrlInfo(apiBaseInfo);
+        if (runtimeInfo) setTauriRuntimeInfo(runtimeInfo);
+        if (backendStatus) setTauriBackendStatus(backendStatus);
+
+        setTauriRealBackendActionPending(true);
+        setTauriRealBackendActionError("");
+        let realStatus = await refreshRealBackendStatus();
+
+        if (!realStatus?.running) {
+          const result =
+            await invokeTauri<TauriBackendActionResult>("start_real_backend");
+          if (!result) {
+            setTauriRealBackendActionError("无法调用 Tauri 控制面命令。");
+          } else if (!result.ok) {
+            setTauriRealBackendActionError(result.message);
+          }
+          realStatus = await refreshRealBackendStatus();
+        }
+
+        if (cancelled) return;
+        setTauriRealBackendActionPending(false);
+
+        if (realStatus?.running && (await waitForBackendHealth())) {
+          await loadRecordings();
+          await loadRecordingSessions();
+        }
+        return;
+      }
+
+      if (await checkBackendHealth()) {
+        await loadRecordings();
+        await loadRecordingSessions();
+      }
+    };
+
+    void loadInitialData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    checkBackendHealth,
+    loadRecordingSessions,
+    loadRecordings,
+    refreshRealBackendStatus,
+    waitForBackendHealth,
+  ]);
+
+  useEffect(() => {
+    if (runtimeEnvironment === "Tauri") {
       void refreshRealBackendStatus();
     }
-  }, [checkBackendHealth, refreshRealBackendStatus]);
+  }, [runtimeEnvironment, refreshRealBackendStatus]);
 
   const clearBrowserRecordingTimer = useCallback(() => {
     if (browserRecordingTimerRef.current !== null) {

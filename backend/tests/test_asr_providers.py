@@ -84,6 +84,10 @@ def test_provider_factory_resolves_all_three(monkeypatch: pytest.MonkeyPatch) ->
         type(get_asr_provider(replace(base, asr_provider="funasr_http"))).__name__
         == "FunasrHttpASRProvider"
     )
+    assert (
+        type(get_asr_provider(replace(base, asr_provider="funasr"))).__name__
+        == "FunasrHttpASRProvider"
+    )
 
 
 def test_unknown_provider_returns_clear_error() -> None:
@@ -118,6 +122,7 @@ def test_funasr_http_requests_configured_base_url(
     monkeypatch.setenv("ASR_PROVIDER", "funasr_http")
     monkeypatch.setenv("FUNASR_HTTP_BASE_URL", "http://10.0.0.7:10095")
     monkeypatch.setenv("FUNASR_HTTP_TRANSCRIBE_PATH", "/asr")
+    monkeypatch.setenv("FUNASR_HTTP_MODEL", "sensevoice")
 
     captured: dict[str, object] = {}
 
@@ -125,6 +130,7 @@ def test_funasr_http_requests_configured_base_url(
         captured["url"] = request.full_url
         captured["method"] = request.get_method()
         captured["timeout"] = timeout
+        captured["body"] = request.data
         return _FakeResponse(
             {
                 "segments": [
@@ -142,6 +148,10 @@ def test_funasr_http_requests_configured_base_url(
     assert response.status_code == 201, response.text
     assert captured["url"] == "http://10.0.0.7:10095/asr"
     assert captured["method"] == "POST"
+    assert b'name="file"; filename=' in captured["body"]
+    assert b'name="audio"; filename=' not in captured["body"]
+    assert b'name="model"' in captured["body"]
+    assert b"sensevoice" in captured["body"]
     payload = response.json()
     assert [s["text"] for s in payload] == ["中路集合", "拿龙"]
     assert all(s["source"] == "funasr_http" for s in payload)
@@ -279,12 +289,16 @@ def test_summary_works_after_funasr_transcription(
 def test_asr_status_endpoint_reports_providers(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("ASR_PROVIDER", "funasr_http")
+    monkeypatch.setenv("ASR_PROVIDER", "funasr")
     monkeypatch.setenv("DASHSCOPE_API_KEY", "test-key")
     monkeypatch.setenv("PUBLIC_BASE_URL", "http://127.0.0.1:8000")
+    monkeypatch.setenv("FUNASR_HTTP_HEALTH_PATH", "/healthz")
+    monkeypatch.setenv("FUNASR_HTTP_MODEL", "sensevoice")
     # Avoid a real network probe in the status endpoint.
     monkeypatch.setattr(
-        asr_status_module, "_probe_funasr", lambda base_url, timeout=2.0: (False, "stubbed")
+        asr_status_module,
+        "_probe_funasr",
+        lambda base_url, health_path="/health", timeout=2.0: (False, "stubbed"),
     )
 
     response = client.get("/api/asr/status")
@@ -301,3 +315,5 @@ def test_asr_status_endpoint_reports_providers(
     assert data["funasr_http"]["reachable"] is False
     assert data["funasr_http"]["error"] == "stubbed"
     assert data["funasr_http"]["base_url"].startswith("http")
+    assert data["funasr_http"]["health_path"] == "/healthz"
+    assert data["funasr_http"]["model"] == "sensevoice"

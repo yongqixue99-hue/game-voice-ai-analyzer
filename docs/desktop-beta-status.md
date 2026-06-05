@@ -1,8 +1,8 @@
 # LUNARIS 桌面端 Beta 状态
 
 > 版本定位：**内部桌面 Beta 候选**（本机 macOS aarch64，未签名）
-> 自动化验收：`scripts/desktop_beta_smoke_check.sh` —— 最近一次 **17 PASS / 0 FAIL / 1 KNOWN**
-> 关联：`docs/desktop-beta-test.md`、`docs/desktop-beta-known-issues.md`
+> 当前 ASR 路线：桌面 sidecar + 局域网 Win 3070 FunASR HTTP Provider
+> 关联：`docs/desktop-beta-test.md`、`docs/desktop-beta-known-issues.md`、`docs/funasr-http-provider-handoff.md`
 
 ---
 
@@ -10,55 +10,82 @@
 
 **可以，作为内部桌面 Beta 候选。**
 
-依据：核心链路（启动/停止真实后端、health、上传、播放、mock 转写、AI 总结、导出、
-session 页）在真实 sidecar 上跑通；`tauri build` 能产出含双 sidecar 的 `LUNARIS.app`；
-进程生命周期干净（停止/关闭后端口释放、无残留）。剩余两项是**已知限制**（真实 ASR 公网
-回源、WebView 录音），不阻塞「内部自测/试用」级别的 Beta。
+相比上一版，核心变化是：桌面端真实 ASR 已不再卡在阿里云公网回源限制上。当前桌面端已能：
 
-尚**不是**正式发布版：未做代码签名 / 公证、未做真实 ASR 端到端闭环。
+```text
+打开 Tauri App
+-> 自动拉起真实 FastAPI sidecar (:18080)
+-> 上传音频
+-> 直传到 Win 3070 FunASR HTTP 服务
+-> 生成 transcript_segments
+-> 调用 DashScope qwen-plus 生成 AI 总结
+```
 
-## 2. 已通过项（自动化验证）
+这已经满足“上传音频复盘”的内部 Beta 标准。
+
+尚**不是**可分发 Beta / 正式版：缺少桌面原生录音、系统声音/游戏语音采集、配置页写入、代码签名/公证。
+
+## 2. 已通过项
 
 | 能力 | 状态 | 验证方式 |
 |---|---|---|
-| Tauri build → LUNARIS.app（含双 sidecar） | ✅ | smoke §6 / 手动 |
-| 真实 backend sidecar 启停 | ✅ | smoke §1 / 手动 B2/B15 |
-| /api/health | ✅ | smoke §1.1 |
-| 停止/关闭后端口释放、无残留进程（B16） | ✅ | smoke §1.3/1.4 |
-| 上传音频 | ✅ | smoke §2.1 / 手动 B8 |
-| 音频播放 | ✅ | 手动 B7 |
-| mock 转写 | ✅ | 手动 B10 |
-| AI 总结 | ✅ | 手动 B12 |
-| 导出 / 整场总结 | ✅ | 手动 B14 |
-| 前端 lint / build（静态导出 out/） | ✅ | smoke §4 |
-| 后端 pytest（35） | ✅ | smoke §5 |
-| Tauri cargo test（sidecar mock-runtime） | ✅ | smoke §3.5 |
+| Tauri dev 打开 LUNARIS 窗口 | ✅ | 手动 |
+| Tauri 启动自动拉起真实 FastAPI sidecar | ✅ | `curl :18080/api/health` |
+| 前端 API base 自动指向 `:18080` | ✅ | 设置页 / 接口验证 |
+| 桌面数据目录 `config/.env` 加载 | ✅ | sidecar ASR status |
+| 上传 MP3 音频 | ✅ | 手动 |
+| 上传时长探测 | ✅ | MP3 样例 `138.579563s` |
+| Win 3070 FunASR health | ✅ | `GET http://192.168.1.5:10095/health` |
+| Win 3070 FunASR 转写 | ✅ | `POST /v1/audio/transcriptions` |
+| FunASR 转写落库 | ✅ | `source=funasr_http` |
+| DashScope AI 总结 | ✅ | `provider=dashscope`, `model=qwen-plus` |
+| 后端 pytest | ✅ | `49 passed` |
+| 前端 lint | ✅ | 通过 |
+| Tauri cargo test | ✅ | `2 passed` |
 
-## 3. 未完全通过项（已知限制，非桌面壳失败）
+## 3. 已知限制
 
 | 项 | 状态 | 说明 |
 |---|---|---|
-| 真实 ASR 端到端 | ⚠️ 受限 | 阿里云需公网音频 URL，桌面端 `127.0.0.1` 本地文件云端不可达。按钮调用 / provider 选择 / 错误链路均正确（错误明确指向公网 URL）。详见 known-issues §2。 |
-| WebView 内置录音 | ⚠️ 受限 | macOS WKWebView 不支持 `MediaRecorder`。改用上传音频。详见 known-issues §1。 |
-| 代码签名 / 公证 | ⚠️ 未做 | 本机内部 Beta，首次打开需右键「打开」。详见 known-issues §3。 |
+| 桌面内置网页录音 | ⚠️ 受限 | macOS WKWebView 中 `MediaRecorder/getUserMedia` 不可靠；下一阶段改做 Tauri/Rust 原生麦克风录音。 |
+| 系统声音 / 游戏声音 / 队友语音 | ❌ 未实现 | 当前不能直接采集系统输出，也不能麦克风 + 系统声混录。 |
+| FunASR 句级时间戳 | ⚠️ 受限 | 当前 Win 服务只返回整段 `text`，LUNARIS 会落成单段 `[0, duration]`。 |
+| WebM 输入 | ⚠️ 受限 | 当前 Win FunASR 服务对本地 WebM 样例返回 500；优先使用 MP3/WAV/M4A。 |
+| 配置体验 | ⚠️ 过渡期 | 仍需手动编辑数据目录 `config/.env`；后续应做设置页配置。 |
+| 代码签名 / 公证 | ⚠️ 未做 | 当前是本机内部 Beta，尚不是可分发版。 |
 
 ## 4. 下一阶段建议
 
-1. **优先闭环真实 ASR**：在 **FunASR HTTP Provider** 与 **OSS 临时签名 URL** 中**二选一**先做一个，
-   解除"真实转写端到端不通"这一当前唯一卡住核心价值的限制。
-   - 推荐顺序见本仓库会话报告 / 团队讨论。
-2. **不要继续堆 UI**：当前 UI 已够用，重心放在 ASR 闭环与稳定性。
-3. **不要先做系统声音录制 / 混录**：在真实 ASR 闭环稳定前，系统声音录制无意义；
-   待 ASR 稳定后再评估。
-4.（可选）真实 ASR 闭环稳定后，再做代码签名 / 公证，迈向"可分发 Beta"。
+1. **先收口当前变更**：文档、测试、sidecar 二进制同步、git 提交。
+2. **做桌面原生麦克风录音**：绕开 WKWebView `MediaRecorder`，先支持录自己的麦克风。
+3. **做游戏自测 Alpha**：用原生麦克风录音 + FunASR + DashScope 跑 10-30 分钟真实游戏场景。
+4. **再做系统声音/混录**：这是队伍语音复盘的关键，但复杂度高于麦克风，应放在麦克风稳定后。
+5. **最后做可分发 Beta**：设置页配置、keychain/配置安全、签名/公证、安装文档。
 
-## 5. 如何复跑自动化验收
+## 5. 当前推荐验收命令
 
 ```bash
-scripts/desktop_beta_smoke_check.sh          # 生命周期 + B11 + 配置 + lint/build/pytest/cargo
-scripts/desktop_beta_smoke_check.sh --quick  # 只跑生命周期 + B11 + 配置检查（秒级）
-scripts/desktop_beta_smoke_check.sh --build  # 额外重跑 npm run tauri build（很慢）
+cd /Users/xueyongqi/project/project-2/backend
+.venv/bin/python -m pytest -q
+
+cd /Users/xueyongqi/project/project-2/frontend
+npm run lint
+npm run build
+
+cd /Users/xueyongqi/project/project-2/frontend/src-tauri
+cargo test -- --test-threads=1
 ```
 
-冒烟脚本对真实数据无副作用：真实后端始终跑在临时 `LUNARIS_DATA_DIR`，不碰你的 dev DB/音频。
-注：frozen onefile 冷启动约 10–15s（解包 + 导入），脚本已留足健康轮询窗口。
+FunASR 状态：
+
+```bash
+curl http://127.0.0.1:18080/api/asr/status
+curl http://192.168.1.5:10095/health
+```
+
+桌面启动：
+
+```bash
+cd /Users/xueyongqi/project/project-2/frontend
+npm run tauri dev
+```

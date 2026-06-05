@@ -25,7 +25,9 @@ def _join_url(base_url: str, path: str) -> str:
     return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
 
 
-def _probe_funasr(base_url: str, timeout: float = 2.0) -> tuple[bool, str]:
+def _probe_funasr(
+    base_url: str, health_path: str = "/health", timeout: float = 2.0
+) -> tuple[bool, str]:
     """Best-effort reachability probe. Never raises.
 
     A FunASR HTTP service is considered "reachable" if the base URL answers at
@@ -35,7 +37,7 @@ def _probe_funasr(base_url: str, timeout: float = 2.0) -> tuple[bool, str]:
     if not base_url:
         return False, "FUNASR_HTTP_BASE_URL 未配置"
 
-    probe_urls = (_join_url(base_url, "/health"), base_url)
+    probe_urls = (_join_url(base_url, health_path), base_url)
     last_error = ""
     for url in probe_urls:
         reachable, detail = _probe_url(url, timeout)
@@ -61,7 +63,10 @@ def _probe_url(url: str, timeout: float) -> tuple[bool, str]:
 @router.get("/status")
 def asr_status() -> dict[str, object]:
     settings = get_settings()
-    funasr_reachable, funasr_detail = _probe_funasr(settings.funasr_http_base_url)
+    funasr_reachable, funasr_detail = _probe_funasr(
+        settings.funasr_http_base_url,
+        settings.funasr_http_health_path,
+    )
     public_base_url_configured = _public_url_is_configured(settings.public_base_url)
     public_url_is_local = _public_url_is_local(settings.public_base_url)
     aliyun_configured = bool(settings.dashscope_api_key)
@@ -82,7 +87,9 @@ def asr_status() -> dict[str, object]:
         "funasr_http": {
             "configured": funasr_configured,
             "base_url": settings.funasr_http_base_url,
+            "health_path": settings.funasr_http_health_path,
             "transcribe_path": settings.funasr_http_transcribe_path,
+            "model": settings.funasr_http_model,
             "reachable": funasr_reachable,
             "error": "" if funasr_reachable else funasr_detail,
             "detail": funasr_detail,

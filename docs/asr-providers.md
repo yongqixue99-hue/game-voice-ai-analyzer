@@ -44,11 +44,14 @@ PUBLIC_BASE_URL=https://your-public-host.example.com   # 必须公网可下载
 ## 2. `ASR_PROVIDER=funasr_http`
 
 本地 / 局域网 FunASR HTTP 服务。**新增**，用来绕开上面的公网 URL 限制。
+`ASR_PROVIDER=funasr` 作为兼容别名也会归一化为 `funasr_http`。
 
 ```env
 ASR_PROVIDER=funasr_http
 FUNASR_HTTP_BASE_URL=http://127.0.0.1:10095     # FunASR HTTP 服务地址
-FUNASR_HTTP_TRANSCRIBE_PATH=/asr                # 转写接口路径（默认 /asr）
+FUNASR_HTTP_HEALTH_PATH=/health
+FUNASR_HTTP_TRANSCRIBE_PATH=/v1/audio/transcriptions
+FUNASR_HTTP_MODEL=sensevoice
 FUNASR_HTTP_TIMEOUT_SECONDS=120
 ```
 
@@ -80,6 +83,13 @@ provider 对 FunASR 响应做宽容解析，依次尝试 `segments` / `sentences
 `speaker|speaker_label|spk`。若只返回整段纯文本无时间戳，则生成一段
 `[0, 录音时长]`，保证可落库、可总结。真实 FunASR 服务接入后如字段不同，可在
 `backend/app/asr.py::parse_funasr_response` 微调映射。
+
+### 请求格式
+
+FunASR HTTP provider 使用 `multipart/form-data` 上传：
+
+- `file`: 音频文件
+- `model`: `FUNASR_HTTP_MODEL`，未配置时不发送该字段
 
 当前已覆盖的响应形态：
 
@@ -140,12 +150,12 @@ ASR_PROVIDER=mock
 
 ---
 
-## 4. 后续可选路线（本次不实现）
+## 4. 后续可选路线
 
 桌面端真实 ASR 端到端的三条路线，按推荐顺序：
 
-1. **FunASR HTTP Provider（本次已支持调用侧）**：本地/局域网推理，隐私 + 离线，
-   不依赖公网回源。下一步是接一个真实 FunASR HTTP 服务做端到端手测。
+1. **FunASR HTTP Provider（当前推荐）**：本地/局域网推理，隐私 + 离线，
+   不依赖公网回源。Win 3070 FunASR 已完成端到端手测。
 2. **OSS 临时签名 URL**：把音频上传对象存储，生成带签名的临时公网 URL 交给阿里云。
    适合走云 ASR + 多端同步的形态。本次不引入 OSS。
 3. **支持文件直传的云 ASR Provider**：换用允许直接 POST 音频、无需公网 URL 的云服务。

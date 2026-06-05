@@ -267,9 +267,12 @@ class FunasrHttpASRProvider:
 
         url = f"{self.settings.funasr_http_base_url}{self.settings.funasr_http_transcribe_path}"
         body, content_type = _build_multipart_body(
-            field_name="audio",
+            field_name="file",
             filename=audio_path.name,
             file_bytes=audio_path.read_bytes(),
+            fields={"model": self.settings.funasr_http_model}
+            if self.settings.funasr_http_model
+            else None,
         )
 
         request = urllib.request.Request(
@@ -312,18 +315,37 @@ class FunasrHttpASRProvider:
 
 
 def _build_multipart_body(
-    field_name: str, filename: str, file_bytes: bytes
+    field_name: str,
+    filename: str,
+    file_bytes: bytes,
+    fields: dict[str, str | None] | None = None,
 ) -> tuple[bytes, str]:
     """Build a minimal multipart/form-data body using stdlib only."""
 
     boundary = f"----LunarisFunASR{uuid.uuid4().hex}"
-    head = (
-        f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="{field_name}"; filename="{filename}"\r\n'
-        f"Content-Type: application/octet-stream\r\n\r\n"
-    ).encode("utf-8")
+    parts: list[bytes] = []
+    for name, value in (fields or {}).items():
+        if value is None:
+            continue
+        parts.append(
+            (
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
+                f"{value}\r\n"
+            ).encode("utf-8")
+        )
+
+    parts.append(
+        (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="{field_name}"; filename="{filename}"\r\n'
+            f"Content-Type: application/octet-stream\r\n\r\n"
+        ).encode("utf-8")
+    )
+    parts.append(file_bytes)
     tail = f"\r\n--{boundary}--\r\n".encode("utf-8")
-    return head + file_bytes + tail, f"multipart/form-data; boundary={boundary}"
+    parts.append(tail)
+    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
 
 
 def _funasr_time_to_seconds(value: Any, *, is_millis: bool) -> float | None:
@@ -595,11 +617,11 @@ def get_asr_provider(settings: Settings | None = None) -> ASRProvider:
         return MockASRProvider()
     if resolved_settings.asr_provider == "aliyun":
         return AliyunASRProvider(resolved_settings)
-    if resolved_settings.asr_provider == "funasr_http":
+    if resolved_settings.asr_provider in {"funasr_http", "funasr"}:
         return FunasrHttpASRProvider(resolved_settings)
 
     raise ASRProviderError(
         400,
         f"不支持的 ASR_PROVIDER：{resolved_settings.asr_provider}。"
-        "可选 mock / aliyun / funasr_http。",
+        "可选 mock / aliyun / funasr_http（兼容 funasr 别名）。",
     )

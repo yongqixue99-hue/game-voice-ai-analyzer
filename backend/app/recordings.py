@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import logging
 import mimetypes
+import re
+import shutil
+import subprocess
+import wave
 from datetime import timezone
 from pathlib import Path
 from uuid import uuid4
@@ -16,6 +21,7 @@ from .models import Recording
 
 router = APIRouter(prefix="/api/recordings", tags=["recordings"])
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 def serialize_recording(recording: Recording) -> dict[str, object]:
@@ -106,6 +112,50 @@ async def save_upload_file(file: UploadFile, destination: Path) -> int:
     return total_bytes
 
 
+def detect_audio_duration_seconds(audio_path: Path) -> float | None:
+    """Best-effort duration probe without adding heavyweight media deps."""
+
+    try:
+        if audio_path.suffix.lower() == ".wav":
+            with wave.open(str(audio_path), "rb") as wav_file:
+                frame_rate = wav_file.getframerate()
+                if frame_rate > 0:
+                    duration = wav_file.getnframes() / frame_rate
+                    return duration if duration > 0 else None
+    except (wave.Error, OSError, EOFError) as error:
+        logger.debug("Could not read WAV duration for %s: %s", audio_path, error)
+
+    afinfo = shutil.which("afinfo")
+    if afinfo is None:
+        return None
+
+    try:
+        result = subprocess.run(
+            [afinfo, str(audio_path)],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        logger.debug("Could not run afinfo for %s: %s", audio_path, error)
+        return None
+
+    if result.returncode != 0:
+        logger.debug("afinfo failed for %s: %s", audio_path, result.stderr[:500])
+        return None
+
+    match = re.search(r"estimated duration:\s*([0-9.]+)\s*sec", result.stdout)
+    if match is None:
+        return None
+
+    try:
+        duration = float(match.group(1))
+    except ValueError:
+        return None
+    return duration if duration > 0 else None
+
+
 async def create_recording_from_upload(file: UploadFile, db: Session) -> Recording:
     original_filename, mime_type = validate_upload_metadata(file)
     suffix = Path(original_filename).suffix.lower()
@@ -124,7 +174,7 @@ async def create_recording_from_upload(file: UploadFile, db: Session) -> Recordi
         file_path=str(relative_path),
         mime_type=mime_type,
         size_bytes=size_bytes,
-        duration=None,
+        duration=detect_audio_duration_seconds(destination),
         status="uploaded",
     )
 

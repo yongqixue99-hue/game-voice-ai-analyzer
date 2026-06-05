@@ -289,6 +289,13 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .manage(BackendProcess::default())
         .manage(RealBackendProcess::default())
+        .setup(|app| {
+            let result = start_real_backend(app.handle().clone(), app.state());
+            if !result.ok {
+                eprintln!("LUNARIS real backend auto-start failed: {}", result.message);
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_api_base_url,
             get_runtime_info,
@@ -418,4 +425,3 @@ mod sidecar_tests {
         assert!(!get_real_backend_status(app.state()).running, "expected stopped");
     }
 }
-

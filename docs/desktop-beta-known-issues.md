@@ -1,57 +1,63 @@
 # LUNARIS 桌面端 Known Issues
 
 > 适用版本：内部 Beta 候选（本机 macOS，未签名/未公证）
-> 关联：`docs/desktop-beta-test.md`、`docs/desktop-beta-status.md`
+> 关联：`docs/desktop-beta-status.md`、`docs/funasr-http-provider-handoff.md`
 
-本文件只记录**已知限制**，区别于 bug。下列各项均为当前刻意不在本阶段解决的范围。
-
----
-
-## 1. macOS WKWebView 中 MediaRecorder 不可用
-
-- **现象**：Tauri 桌面壳用 macOS WKWebView 渲染。WebView 内点网页录音时提示
-  「当前浏览器不支持网页录音，请换用 Chrome/Edge」——`MediaRecorder` / `getUserMedia`
-  在 WKWebView 中不可用或不稳定。
-- **影响**：桌面端**内置网页录音**不可用。
-- **临时方案**：改用**上传音频**链路（已验证可用）。
-- **后续方案**：用 Tauri/Rust 原生录音或桌面音频采集桥接替代网页 `MediaRecorder`。
-- **不在本阶段做**：原生录音桥接。
-
-## 2. 阿里云非实时 ASR 需要公网音频 URL
-
-- **现象**：真实转写走阿里云 provider 时，云端需要一个**可公网下载**的音频 URL；
-  桌面端音频是本地文件，`PUBLIC_BASE_URL` 指向 `127.0.0.1` 时云端无法下载，
-  报「阿里云无法访问本地音频 URL…」或任务侧 `FILE_DOWNLOAD_FAILED`。
-- **影响**：桌面端真实 ASR **端到端不通**；按钮调用、provider 选择、错误链路本身是对的。
-- **重要**：这是 ASR 供给侧限制，**不是桌面壳失败**。冒烟脚本据此把它判为
-  `KNOWN`（已知限制），不计入失败。
-- **附注**：桌面 sidecar 跑在 `:18080`，而隧道通常指向 dev `:8000` 且音频在桌面数据目录，
-  故即便配了隧道也未必端到端通——同属此限制。
-- **临时方案**：开发期用 localtunnel / ngrok / Cloudflare Tunnel 暴露后端。
-- **后续方案（三选一）**：
-  1. **OSS 临时签名 URL**：上传到对象存储，生成带签名的临时公网 URL 交给阿里云。
-  2. **FunASR HTTP Provider**：本机/局域网跑 FunASR 推理服务，后端走 HTTP provider，
-     不依赖公网回源。
-  3. **支持文件直传的 ASR provider**：换用允许直接 POST 音频文件、无需公网 URL 的服务。
-- **不在本阶段做**：不引入 OSS 实现、不本地部署 FunASR。
-
-## 3. 生产构建与签名未完成
-
-- **现象**：`LUNARIS.app` 可由 `npm run tauri build` 产出，但**未做代码签名 / 公证**，
-  且仅当前平台（`aarch64-apple-darwin`）。
-- **影响**：当前是**本机内部 Beta**，不是正式发布版；首次打开需右键「打开」绕过 Gatekeeper。
-- **后续方案**：申请 Developer ID 证书做 codesign + notarize；按需出 Intel / 通用二进制。
-- **不在本阶段做**：签名、公证、正式安装包。
+本文件只记录**已知限制**，区别于 bug。
 
 ---
 
-## 附：凭证位置（非 bug，配置须知）
+## 1. macOS WKWebView 中 MediaRecorder 不可用或不稳定
 
-frozen sidecar 不读仓库 `.env`（`__file__` 在临时解包目录）。桌面端密钥需放数据目录：
+- **现象**：Tauri 桌面壳用 macOS WKWebView 渲染。WebView 内置网页录音不能作为稳定桌面录音方案。
+- **影响**：桌面端不能依赖现有 Web `MediaRecorder` 录音按钮完成游戏录音。
+- **临时方案**：继续使用上传音频文件链路。
+- **后续方案**：实现 Tauri/Rust 原生麦克风录音，录完后复用现有上传、FunASR 转写、AI 总结链路。
 
-```
+## 2. 系统声音 / 游戏声音 / 队友语音采集未实现
+
+- **现象**：当前只能处理上传的音频文件；尚不能直接采集系统输出音频。
+- **影响**：不能直接录到游戏声音、Discord/YY/游戏内队友语音。
+- **当前可测范围**：上传音频复盘；下一阶段原生麦克风录音后，可测试“只录自己说话”的游戏场景。
+- **后续方案**：
+  1. 先做原生麦克风录音。
+  2. 再评估系统声音采集。
+  3. 最后做麦克风 + 系统声音混录。
+
+## 3. Win FunASR 当前只返回整段文本
+
+- **现象**：`POST /v1/audio/transcriptions` 当前返回 `{"text": "..."}`，没有 `segments` 或 `sentence_info`。
+- **影响**：LUNARIS 会生成 1 个整段 segment，时间范围为 `[0, 音频时长]`。AI 总结可用，但时间轴无法细分到句子。
+- **后续方案**：如果 Win FunASR 服务能返回句级时间戳，优先只调整 `backend/app/asr.py::parse_funasr_response`，不要重构主链路。
+
+## 4. WebM 输入在当前 Win FunASR 服务上可能失败
+
+- **现象**：本地 WebM 样例直连 Win FunASR 服务曾返回 HTTP 500。
+- **影响**：WebView/浏览器录音生成的 `.webm` 可能不能直接被当前 Win 服务识别。
+- **临时方案**：内部测试优先使用 MP3 / WAV / M4A。
+- **后续方案**：确认 Win 服务 ffmpeg/解码能力，或在 LUNARIS 后端增加音频转码链路。转码会引入外部依赖，需单独 OpenSpec change。
+
+## 5. 阿里云非实时 ASR 仍需要公网音频 URL
+
+- **现象**：`ASR_PROVIDER=aliyun` 时，阿里云云端需要公网可下载的音频 URL。
+- **影响**：桌面本地音频不能直接走阿里云 ASR，除非使用 OSS 签名 URL、隧道或其他公网托管方式。
+- **当前状态**：这不再阻塞桌面真实 ASR，因为当前推荐路径是 `ASR_PROVIDER=funasr_http`。
+- **后续定位**：阿里云 provider 继续保留，适用于云端部署或未来 OSS 签名 URL 路线。
+
+## 6. 配置仍是过渡形态
+
+- **现象**：桌面端 provider / FunASR 地址 / LLM provider 目前通过数据目录 `config/.env` 配置。
+- **位置**：
+
+```text
 ~/Library/Application Support/com.lunaris.voice-analyzer/data/config/.env
 ```
 
-模板见 `backend/desktop-data-config.env.example`。缺失时启动日志会打印
-`credentials .env: ... missing — real ASR/LLM keys unset`。
+- **影响**：非开发用户不应手动编辑 `.env`。
+- **后续方案**：设置页提供 FunASR URL、model、LLM provider、key 状态配置；密钥最终应进入系统 keychain 或安全本地存储。
+
+## 7. 生产构建与签名未完成
+
+- **现象**：可以构建 `.app`，但未做正式图标、代码签名、公证和安装文档。
+- **影响**：当前是本机内部 Beta，不是可分发版本。
+- **后续方案**：完成核心录音能力后，再做正式图标、Developer ID 签名、公证和安装包验证。

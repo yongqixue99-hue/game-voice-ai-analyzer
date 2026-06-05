@@ -44,7 +44,9 @@ class Settings:
     aliyun_asr_max_polls: int
     aliyun_asr_request_timeout_seconds: float
     funasr_http_base_url: str
+    funasr_http_health_path: str
     funasr_http_transcribe_path: str
+    funasr_http_model: str | None
     funasr_http_timeout_seconds: float
     llm_provider: str
     dashscope_llm_model: str
@@ -53,6 +55,18 @@ class Settings:
     openai_llm_model: str
     openai_llm_base_url: str
     llm_request_timeout_seconds: float
+
+
+def _normalize_path_env(value: str, default: str) -> str:
+    path = (value or default).strip()
+    return "/" + path.lstrip("/")
+
+
+def _normalize_asr_provider(value: str) -> str:
+    provider = value.strip().lower()
+    if provider in {"funasr", "funasr-http"}:
+        return "funasr_http"
+    return provider
 
 
 def get_settings() -> Settings:
@@ -97,7 +111,7 @@ def get_settings() -> Settings:
                 "audio/webm",
             }
         ),
-        asr_provider=os.getenv("ASR_PROVIDER", "aliyun").strip().lower(),
+        asr_provider=_normalize_asr_provider(os.getenv("ASR_PROVIDER", "aliyun")),
         dashscope_api_key=os.getenv("DASHSCOPE_API_KEY") or None,
         aliyun_asr_model=os.getenv("ALIYUN_ASR_MODEL", "fun-asr"),
         aliyun_dashscope_base_url=os.getenv(
@@ -117,8 +131,13 @@ def get_settings() -> Settings:
         funasr_http_base_url=os.getenv(
             "FUNASR_HTTP_BASE_URL", "http://127.0.0.1:10095"
         ).rstrip("/"),
-        funasr_http_transcribe_path="/"
-        + os.getenv("FUNASR_HTTP_TRANSCRIBE_PATH", "/asr").lstrip("/"),
+        funasr_http_health_path=_normalize_path_env(
+            os.getenv("FUNASR_HTTP_HEALTH_PATH", "/health"), "/health"
+        ),
+        funasr_http_transcribe_path=_normalize_path_env(
+            os.getenv("FUNASR_HTTP_TRANSCRIBE_PATH", "/asr"), "/asr"
+        ),
+        funasr_http_model=os.getenv("FUNASR_HTTP_MODEL", "").strip() or None,
         funasr_http_timeout_seconds=float(
             os.getenv("FUNASR_HTTP_TIMEOUT_SECONDS", "120")
         ),

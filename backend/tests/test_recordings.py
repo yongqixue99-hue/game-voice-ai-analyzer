@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import tempfile
 import urllib.error
+import wave
 
 import pytest
 from fastapi.testclient import TestClient
@@ -61,6 +62,17 @@ def create_test_session(client: TestClient, title: str = "测试长录音") -> d
     return response.json()
 
 
+def make_wav_bytes(duration_seconds: float = 0.25, sample_rate: int = 8000) -> bytes:
+    buffer = BytesIO()
+    frame_count = int(duration_seconds * sample_rate)
+    with wave.open(buffer, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(b"\x00\x00" * frame_count)
+    return buffer.getvalue()
+
+
 def upload_test_session_chunk(
     client: TestClient,
     session_id: str,
@@ -100,6 +112,17 @@ def test_upload_recording_creates_metadata_and_audio_file(client: TestClient) ->
     assert payload["status"] == "uploaded"
     assert payload["filename"].endswith(".mp3")
     assert (get_settings().project_root / payload["file_path"]).exists()
+
+
+def test_upload_wav_recording_detects_duration(client: TestClient) -> None:
+    response = client.post(
+        "/api/recordings/upload",
+        files={"file": ("match.wav", BytesIO(make_wav_bytes()), "audio/wav")},
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["duration"] == pytest.approx(0.25)
 
 
 def test_upload_webm_recording_creates_metadata_and_audio_file(
